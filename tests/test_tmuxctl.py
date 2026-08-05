@@ -1,0 +1,77 @@
+import subprocess
+from concierge import tmuxctl
+
+
+def fake_runner(stdout="", returncode=0):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    run.calls = calls
+    return run
+
+
+def test_extract_rc_url_finds_the_session_link():
+    pane = (
+        "Remote Control active\n"
+        "  https://claude.ai/code/session_01ABCdef\n"
+        "> \n"
+    )
+    assert tmuxctl.extract_rc_url(pane) == "https://claude.ai/code/session_01ABCdef"
+
+
+def test_extract_rc_url_takes_the_last_match():
+    pane = "https://claude.ai/code/old\nhttps://claude.ai/code/new\n"
+    assert tmuxctl.extract_rc_url(pane) == "https://claude.ai/code/new"
+
+
+def test_extract_rc_url_strips_trailing_punctuation():
+    assert tmuxctl.extract_rc_url("see https://claude.ai/code/abc.") == \
+        "https://claude.ai/code/abc"
+
+
+def test_extract_rc_url_returns_none_when_absent():
+    assert tmuxctl.extract_rc_url("nothing here") is None
+
+
+def test_build_shell_command_quotes_arguments_with_spaces():
+    cmd = tmuxctl.build_shell_command("/tmp/my repo", ["claude", "--rc", "[A3] a b"])
+    assert cmd == "cd '/tmp/my repo' && exec claude --rc '[A3] a b'"
+
+
+def test_build_shell_command_survives_a_single_quote_in_the_title():
+    cmd = tmuxctl.build_shell_command("/tmp", ["claude", "Bos's job"])
+    # shlex.quote produces the safe '"'"' form; the point is it round-trips.
+    assert "Bos" in cmd and cmd.startswith("cd /tmp && exec claude ")
+
+
+def test_has_session_true_on_exit_zero():
+    run = fake_runner(returncode=0)
+    assert tmuxctl.has_session("concierge", runner=run) is True
+    assert run.calls[0] == ["tmux", "has-session", "-t", "concierge"]
+
+
+def test_has_session_false_on_nonzero():
+    assert tmuxctl.has_session("concierge", runner=fake_runner(returncode=1)) is False
+
+
+def test_new_window_passes_session_window_and_command():
+    run = fake_runner()
+    tmuxctl.new_window("concierge", "A3", "cd /x && exec claude", runner=run)
+    assert run.calls[0] == [
+        "tmux", "new-window", "-t", "concierge", "-n", "A3",
+        "cd /x && exec claude",
+    ]
+
+
+def test_list_windows_parses_names():
+    run = fake_runner(stdout="0\nA3\nB7\n")
+    assert tmuxctl.list_windows("concierge", runner=run) == ["0", "A3", "B7"]
+
+
+def test_capture_targets_session_and_window():
+    run = fake_runner(stdout="pane text")
+    assert tmuxctl.capture("concierge", "A3", runner=run) == "pane text"
+    assert run.calls[0] == ["tmux", "capture-pane", "-p", "-t", "concierge:A3"]
