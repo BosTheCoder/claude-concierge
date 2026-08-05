@@ -51,9 +51,9 @@ def prunable(jobs: dict, now: datetime, days: int = 7) -> list[str]:
     )
 
 
-def _default_notifier(message: str) -> None:
+def _default_notifier(message: str, state_path: Path | None = None) -> None:
     """Best effort. A broken notify must never stop the supervisor."""
-    jobs = registry.load()
+    jobs = registry.load(state_path)
     chat_ids = {j.get("chat_id") for j in jobs.values() if j.get("chat_id")}
     for chat_id in chat_ids:
         try:
@@ -70,7 +70,11 @@ def ensure_up(
     notifier=None,
 ) -> str:
     env = os.environ if env is None else env
-    notifier = notifier or _default_notifier
+    notifier = notifier or (lambda msg: _default_notifier(msg, state_path))
+
+    if tmux.has_session(config.TMUX_SESSION):
+        # Healthy. Say nothing, and never interrupt a live turn.
+        return "healthy"
 
     blocked = blocking_env(env)
     if blocked:
@@ -80,16 +84,16 @@ def ensure_up(
         )
         return "blocked"
 
-    if tmux.has_session(config.TMUX_SESSION):
-        # Healthy. Say nothing, and never interrupt a live turn.
-        return "healthy"
-
     argv = concierge_argv()
-    tmux.new_session(
-        config.TMUX_SESSION,
-        "0",
-        tmux.build_shell_command(str(config.TASKS_REPO), argv),
-    )
+    try:
+        tmux.new_session(
+            config.TMUX_SESSION,
+            "0",
+            tmux.build_shell_command(str(config.TASKS_REPO), argv),
+        )
+    except RuntimeError as exc:
+        notifier(f"concierge failed to start: {exc}")
+        raise
 
     jobs = registry.load(state_path)
     orphans = reconcile(jobs, tmux.list_windows(config.TMUX_SESSION))

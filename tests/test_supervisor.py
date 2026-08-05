@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import pytest
 from concierge import registry, supervisor
 
 
@@ -69,6 +70,11 @@ class FakeTmux:
         return f"cd {cwd} && exec " + " ".join(argv)
 
 
+class FailingTmux(FakeTmux):
+    def new_session(self, session, window, shell_command, **kw):
+        raise RuntimeError("tmux new-session failed: no server running")
+
+
 def test_ensure_up_refuses_to_start_with_a_blocking_env_var(tmp_path):
     notes = []
     result = supervisor.ensure_up(
@@ -116,3 +122,44 @@ def test_ensure_up_reports_jobs_orphaned_by_the_restart(tmp_path):
 
     assert any("A3" in n for n in notes)
     assert registry.load(state)["A3"]["status"] == "orphaned"
+
+
+def test_ensure_up_stays_healthy_even_with_a_blocking_env_var_set(tmp_path):
+    notes = []
+    tmux = FakeTmux(alive=True)
+    result = supervisor.ensure_up(
+        env={"CLAUDE_CODE_OAUTH_TOKEN": "x"},
+        tmux=tmux,
+        state_path=tmp_path / "jobs.json",
+        notifier=notes.append,
+    )
+    assert result == "healthy"
+    assert notes == []
+    assert tmux.started == []
+
+
+def test_ensure_up_notifies_and_reraises_when_tmux_start_fails(tmp_path):
+    notes = []
+    with pytest.raises(RuntimeError, match="tmux new-session failed"):
+        supervisor.ensure_up(
+            env={},
+            tmux=FailingTmux(alive=False),
+            state_path=tmp_path / "jobs.json",
+            notifier=notes.append,
+        )
+    assert any("failed to start" in n for n in notes)
+
+
+def test_default_notifier_honours_an_injected_state_path(tmp_path, monkeypatch):
+    state = tmp_path / "jobs.json"
+    registry.upsert("A3", state, id="A3", status="running", chat_id="9")
+
+    sent = []
+    monkeypatch.setattr(
+        supervisor.telegram, "send",
+        lambda chat_id, text, **kw: sent.append(chat_id),
+    )
+
+    supervisor._default_notifier("hello", state)
+
+    assert sent == ["9"]
