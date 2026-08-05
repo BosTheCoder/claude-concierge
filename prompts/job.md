@@ -36,9 +36,14 @@ it; the link will 404.
 
 ## Permissions
 
-You run with normal permissions. When a tool needs approval the prompt
-reaches the phone through Remote Control. Do not try to route around it, and
-never suggest `--dangerously-skip-permissions`.
+You run in bypass mode: nothing will stop you. Two things are still true.
+Stay inside your task folder and its repo — you were given one job. And for
+anything outward or irreversible that the brief did not ask for — sending mail
+or messages as Bos, YNAB or TickTick writes, a force push, deleting anything —
+stop and ask with `--status waiting` instead of doing it.
+
+Someone watching your Remote Control session sees every tool call as it
+happens. That link is the progress report, which is why you do not narrate.
 
 ## Before compaction
 
