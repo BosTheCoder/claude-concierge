@@ -33,14 +33,18 @@ def has_session(session: str, *, runner=None) -> bool:
 
 def new_session(session: str, window: str, shell_command: str, *, runner=None) -> None:
     runner = runner or _run
-    runner([
+    result = runner([
         "tmux", "new-session", "-d", "-s", session, "-n", window, shell_command
     ])
+    if result.returncode != 0:
+        raise RuntimeError(f"tmux new-session failed: {result.stderr.strip()}")
 
 
 def new_window(session: str, window: str, shell_command: str, *, runner=None) -> None:
     runner = runner or _run
-    runner(["tmux", "new-window", "-t", session, "-n", window, shell_command])
+    result = runner(["tmux", "new-window", "-t", session, "-n", window, shell_command])
+    if result.returncode != 0:
+        raise RuntimeError(f"tmux new-window failed: {result.stderr.strip()}")
 
 
 def kill_window(session: str, window: str, *, runner=None) -> None:

@@ -1,4 +1,5 @@
 import subprocess
+import pytest
 from concierge import tmuxctl
 
 
@@ -75,3 +76,36 @@ def test_capture_targets_session_and_window():
     run = fake_runner(stdout="pane text")
     assert tmuxctl.capture("concierge", "A3", runner=run) == "pane text"
     assert run.calls[0] == ["tmux", "capture-pane", "-p", "-t", "concierge:A3"]
+
+
+def test_new_session_passes_session_window_and_command():
+    run = fake_runner()
+    tmuxctl.new_session("concierge", "0", "cd /x && exec claude", runner=run)
+    assert run.calls[0] == [
+        "tmux", "new-session", "-d", "-s", "concierge", "-n", "0",
+        "cd /x && exec claude",
+    ]
+
+
+def test_new_session_raises_on_nonzero():
+    run = fake_runner(returncode=1, stdout="")
+    # Update the fake_runner to return stderr for the error message
+    def run_with_stderr(argv):
+        return subprocess.CompletedProcess(argv, 1, "", "session already exists")
+
+    with pytest.raises(RuntimeError, match="tmux new-session failed: session already exists"):
+        tmuxctl.new_session("concierge", "0", "cd /x && exec claude", runner=run_with_stderr)
+
+
+def test_new_window_raises_on_nonzero():
+    def run_with_stderr(argv):
+        return subprocess.CompletedProcess(argv, 1, "", "bad session name")
+
+    with pytest.raises(RuntimeError, match="tmux new-window failed: bad session name"):
+        tmuxctl.new_window("concierge", "A3", "cd /x && exec claude", runner=run_with_stderr)
+
+
+def test_kill_window_targets_session_and_window():
+    run = fake_runner()
+    tmuxctl.kill_window("concierge", "A3", runner=run)
+    assert run.calls[0] == ["tmux", "kill-window", "-t", "concierge:A3"]
