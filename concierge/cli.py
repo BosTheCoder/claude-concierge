@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -53,24 +54,104 @@ def notify(
         raise KeyError(f"unknown job: {job_id}")
     job = jobs[job_id]
 
-    body = f"[{job_id}] {text}"
+    body = text
     if file:
-        body += "\n" + github_link(job["cwd"], job["task_folder"], file)
+        folder = job.get("task_folder")
+        try:
+            if not folder:
+                raise ValueError("no task folder recorded for this job")
+            body += "\n" + github_link(job["cwd"], folder, file)
+        except ValueError as exc:
+            # A link we cannot build must never cost the message itself.
+            path = f"{folder}/{file}" if folder else file
+            body += f"\n{path} (no GitHub link: {exc})"
 
-    telegram.send(job["chat_id"], body, reply_to=job.get("root_message_id"))
+    telegram.send(
+        job["chat_id"],
+        body,
+        reply_to=job.get("root_message_id"),
+        prefix=f"[{job_id}] ",
+    )
+    registry.remember_chat(job["chat_id"], state_path)
 
     if status:
         registry.upsert(job_id, state_path, status=status)
 
 
+RESUME_PREFIX = (
+    "You are resuming an interrupted job. Its task folder has notes.md and "
+    "index.md — read them first.\n\n"
+)
+
+
+def respawn(job_id: str, *, state_path: Path | None = None) -> dict:
+    """Start a fresh session for a job the restart interrupted."""
+    jobs = registry.load(state_path)
+    if job_id not in jobs:
+        raise KeyError(f"unknown job: {job_id}")
+    job = jobs[job_id]
+
+    brief, cwd = job.get("brief"), job.get("cwd")
+    if not brief or not cwd:
+        raise ValueError(
+            f"cannot respawn {job_id}: no brief or cwd stored — spawn it fresh"
+        )
+
+    fresh = spawn_mod.spawn_job(
+        title=job.get("title", job_id),
+        brief=RESUME_PREFIX + brief,
+        cwd=cwd,
+        chat_id=job["chat_id"],
+        root_message_id=job.get("root_message_id"),
+        task_folder=job.get("task_folder"),
+        state_path=state_path,
+    )
+    registry.upsert(job_id, state_path, status="respawned")
+    return fresh
+
+
 @app.command("notify")
 def notify_cmd(
-    job_id: str,
-    text: str,
+    job_id: str = typer.Argument(
+        None, help="Defaults to $CONCIERGE_JOB_ID, set for you at spawn"
+    ),
+    text: str = typer.Argument(None),
     file: str = typer.Option(None, help="Filename inside the job's task folder"),
     status: str = typer.Option(None, help="New status, e.g. done|failed|waiting"),
 ):
+    job_id, text = resolve_notify_args(job_id, text)
     notify(job_id, text, file=file, status=status)
+
+
+def resolve_notify_args(
+    job_id: str | None, text: str | None, env: dict | None = None
+) -> tuple[str, str]:
+    """`notify A3 "done"` and `notify "done"` both have to work.
+
+    The env var is the primary mechanism because it survives compaction,
+    which the session name and the brief do not.
+    """
+    env = os.environ if env is None else env
+    env_id = env.get("CONCIERGE_JOB_ID")
+    if text is None:
+        # One positional means it is the message; the id comes from the spawn.
+        job_id, text = env_id, job_id
+    else:
+        job_id = job_id or env_id
+    if not job_id:
+        raise typer.BadParameter(
+            "no job id given and CONCIERGE_JOB_ID is not set in the environment"
+        )
+    if not text:
+        raise typer.BadParameter("no message text given")
+    return job_id, text
+
+
+@app.command("respawn")
+def respawn_cmd(job_id: str):
+    job = respawn(job_id)
+    typer.echo(job["id"])
+    typer.echo(job.get("rc_url") or "")
 
 
 @app.command("jobs")

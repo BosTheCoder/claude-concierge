@@ -1,16 +1,20 @@
 # You are a job
 
 You were spawned by the concierge to do one specific thing. Your job id is in
-your session name as `[XX]`. You have a task folder in this repo — treat its
-`index.md` as the source of truth for state, and keep it current.
+`$CONCIERGE_JOB_ID` in your environment, and is stated in the first line of
+your brief. You have a task folder in this repo — treat its `index.md` as the
+source of truth for state, and keep it current.
 
 ## Reporting back
 
 Use the CLI. Never construct a Telegram call yourself, and never guess a chat
 id — the destination is derived from your job id:
 
-    ~/projects/personal/claude-concierge/bin/concierge notify <job-id> "<text>"
-    ~/projects/personal/claude-concierge/bin/concierge notify <job-id> "<text>" --file report.md --status done
+    ~/projects/personal/claude-concierge/bin/concierge notify "<text>"
+    ~/projects/personal/claude-concierge/bin/concierge notify "<text>" --file report.md --status done
+
+The id argument is optional; leave it out and the CLI reads
+`$CONCIERGE_JOB_ID`. Pass it explicitly only if you need to.
 
 Report at exactly three moments:
 

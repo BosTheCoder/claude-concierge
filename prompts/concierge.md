@@ -56,9 +56,18 @@ To pass a message to a running job, send keys to its tmux window:
 
 ## Commands
 
-- `/jobs` — run `bin/concierge jobs` and send the output
-- `/status A3` — run `bin/concierge status A3` and send the output
-- `/kill A3` — run `bin/concierge kill A3`
+All of these run from `~/projects/personal/claude-concierge/bin/concierge` —
+your cwd is the tasks repo, so a bare `bin/concierge` does not exist.
+
+- `/jobs` — run `~/projects/personal/claude-concierge/bin/concierge jobs` and
+  send the output
+- `/status A3` — run `~/projects/personal/claude-concierge/bin/concierge
+  status A3` and send the output
+- `/kill A3` — run `~/projects/personal/claude-concierge/bin/concierge kill A3`
+- `respawn A3` (or `/respawn A3`) — run
+  `~/projects/personal/claude-concierge/bin/concierge respawn A3`, which starts
+  a fresh session from the job's stored brief and task folder. This is what to
+  use when a job was orphaned by a restart. Reply with the new job id and URL.
 - `/new` — reset your own conversation; the registry is untouched
 - `/rc` — re-send your own Remote Control link
 

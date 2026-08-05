@@ -10,14 +10,36 @@ from concierge import config, registry, tmuxctl
 
 
 def claude_argv(job_id: str, title: str, brief: str, prompt_file: Path) -> list[str]:
+    # The id leads the brief so the model can read it in prose too; the
+    # authoritative copy is CONCIERGE_JOB_ID in the environment.
     return [
         "claude",
         "--remote-control",
         f"[{job_id}] {title}",
         "--append-system-prompt-file",
         str(prompt_file),
-        brief,
+        f"Your job id is {job_id}.\n\n{brief}",
     ]
+
+
+def resolve_cwd(cwd: str) -> Path:
+    """Reject anything that is not one of the two permitted repos.
+
+    tmux forking a shell says nothing about the command surviving: a bad path
+    makes `cd` fail, `&&` short-circuit, and the window close instantly.
+    """
+    resolved = Path(cwd).expanduser().resolve()
+    permitted = {config.TASKS_REPO.resolve(), config.NPM_REPO.resolve()}
+    if resolved not in permitted:
+        raise ValueError(f"cwd not a permitted repo: {cwd}")
+    return resolved
+
+
+def session_id_from_url(rc_url: str | None) -> str | None:
+    """https://claude.ai/code/<session-id> — what makes --resume possible."""
+    if not rc_url:
+        return None
+    return rc_url.rstrip("/").rsplit("/", 1)[-1] or None
 
 
 def poll_for_rc_url(
@@ -57,30 +79,45 @@ def spawn_job(
     tmux=tmuxctl,
     poller=None,
 ) -> dict:
+    repo = str(resolve_cwd(cwd))
+
     jobs = registry.load(state_path)
     job_id = registry.allocate_id(jobs)
 
     prompt_file = config.PROMPTS_DIR / "job.md"
     argv = claude_argv(job_id, title, brief, prompt_file)
     tmux.new_window(
-        config.TMUX_SESSION, job_id, tmux.build_shell_command(cwd, argv)
+        config.TMUX_SESSION,
+        job_id,
+        tmux.build_shell_command(repo, argv, {"CONCIERGE_JOB_ID": job_id}),
     )
 
     poller = poller or poll_for_rc_url
     rc_url = poller(job_id)
+
+    # No URL can mean a slow start — or a window that died on the first line.
+    died = rc_url is None and job_id not in tmux.list_windows(config.TMUX_SESSION)
 
     registry.upsert(
         job_id,
         state_path,
         id=job_id,
         title=title,
-        status="running",
+        status="failed" if died else "running",
         chat_id=chat_id,
         root_message_id=root_message_id,
-        cwd=cwd,
+        cwd=repo,
         task_folder=task_folder,
         tmux_window=job_id,
+        brief=brief,
+        claude_session_id=session_id_from_url(rc_url),
         rc_url=rc_url,
         opened_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
+    registry.remember_chat(chat_id, state_path)
+
+    if died:
+        raise RuntimeError(
+            f"job {job_id} died immediately — check the brief and cwd"
+        )
     return registry.load(state_path)[job_id]

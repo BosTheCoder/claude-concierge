@@ -51,15 +51,69 @@ def prunable(jobs: dict, now: datetime, days: int = 7) -> list[str]:
     )
 
 
+def concierge_alive(tmux) -> bool:
+    """The session exists AND window 0 still has a claude process.
+
+    Every job is a window in this same session, so a live job keeps the
+    session up after the concierge's own process is OOM-killed or crashes.
+    A bare has_session would report 'healthy' while messages pile up unread.
+    """
+    if not tmux.has_session(config.TMUX_SESSION):
+        return False
+    command = tmux.window_command(config.TMUX_SESSION, "0")
+    return bool(command) and "claude" in command
+
+
+def alert_destination(state_path: Path | None = None) -> str | None:
+    """One destination, never a broadcast.
+
+    The most recently touched job's chat — an active job winning a same-second
+    tie — falling back to the last chat we spoke to, which is the only thing
+    that exists on a fresh registry.
+    """
+    rows = [j for j in registry.load(state_path).values() if j.get("chat_id")]
+    if rows:
+        newest = max(
+            rows,
+            key=lambda j: (
+                j.get("last_update") or "",
+                j.get("status") in config.ACTIVE_STATUSES,
+            ),
+        )
+        return newest["chat_id"]
+    return registry.last_chat(state_path)
+
+
 def _default_notifier(message: str, state_path: Path | None = None) -> None:
     """Best effort. A broken notify must never stop the supervisor."""
-    jobs = registry.load(state_path)
-    chat_ids = {j.get("chat_id") for j in jobs.values() if j.get("chat_id")}
-    for chat_id in chat_ids:
-        try:
-            telegram.send(chat_id, message)
-        except Exception as exc:  # noqa: BLE001 - never let notify kill the supervisor
-            print(f"concierge: notify to {chat_id} failed: {exc}", file=sys.stderr)
+    # Always leave a trace: a hidden detached run with no destination at all
+    # would otherwise swallow the one alert that matters most.
+    print(message, file=sys.stderr)
+
+    chat_id = alert_destination(state_path)
+    if not chat_id:
+        return
+    try:
+        telegram.send(chat_id, message)
+    except Exception as exc:  # noqa: BLE001 - never let notify kill the supervisor
+        print(f"concierge: notify to {chat_id} failed: {exc}", file=sys.stderr)
+
+
+def _start_concierge(tmux) -> None:
+    """Start window 0, whether or not the session is already there.
+
+    If jobs are still running the session exists and new_session would fail,
+    so replace window 0 in place instead.
+    """
+    shell_command = tmux.build_shell_command(
+        str(config.TASKS_REPO), concierge_argv()
+    )
+    if not tmux.has_session(config.TMUX_SESSION):
+        tmux.new_session(config.TMUX_SESSION, "0", shell_command)
+        return
+    if "0" in tmux.list_windows(config.TMUX_SESSION):
+        tmux.kill_window(config.TMUX_SESSION, "0")
+    tmux.new_window(config.TMUX_SESSION, "0", shell_command)
 
 
 def ensure_up(
@@ -72,7 +126,7 @@ def ensure_up(
     env = os.environ if env is None else env
     notifier = notifier or (lambda msg: _default_notifier(msg, state_path))
 
-    if tmux.has_session(config.TMUX_SESSION):
+    if concierge_alive(tmux):
         # Healthy. Say nothing, and never interrupt a live turn.
         return "healthy"
 
@@ -84,14 +138,13 @@ def ensure_up(
         )
         return "blocked"
 
-    argv = concierge_argv()
     try:
-        tmux.new_session(
-            config.TMUX_SESSION,
-            "0",
-            tmux.build_shell_command(str(config.TASKS_REPO), argv),
-        )
+        _start_concierge(tmux)
     except RuntimeError as exc:
+        if "duplicate session" in str(exc):
+            # The logon task and the 5-minute watchdog can fire together and
+            # both see no session. The loser lost a race, not a concierge.
+            return "healthy"
         notifier(f"concierge failed to start: {exc}")
         raise
 
@@ -102,14 +155,20 @@ def ensure_up(
         title = jobs[job_id].get("title", "")
         notifier(
             f"[{job_id}] {title} was mid-flight when the machine restarted. "
-            f"Reply to resume it, or /kill {job_id} to close it."
+            f"Reply `respawn {job_id}` to start it again from its task folder, "
+            f"or /kill {job_id} to close it."
         )
 
     now = datetime.now(timezone.utc)
-    stale = prunable(registry.load(state_path), now)
+    remaining = registry.load(state_path)
+    stale = prunable(remaining, now)
     if stale:
-        remaining = registry.load(state_path)
         for job_id in stale:
+            # The prune is what returns an id to the pool, so the window it
+            # names has to go with it — a finished job leaves its REPL open.
+            window = remaining[job_id].get("tmux_window")
+            if window:
+                tmux.kill_window(config.TMUX_SESSION, window)
             remaining.pop(job_id, None)
         registry.save(remaining, state_path)
 
