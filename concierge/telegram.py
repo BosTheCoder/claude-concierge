@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def chunk(text: str, limit: int = LIMIT) -> list[str]:
     return parts
 
 
-def _post(url: str, payload: dict) -> dict:
+def _urlopen(url: str, payload: dict) -> dict:
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}
@@ -47,11 +48,30 @@ def _post(url: str, payload: dict) -> dict:
         return json.loads(resp.read())
 
 
+def _post(url: str, payload: dict, *, opener=None, sleeper=None) -> dict:
+    """Telegram answers HTTP 200 with {"ok": false} on a rejected send."""
+    opener = opener or _urlopen
+    sleeper = sleeper or time.sleep
+
+    try:
+        data = opener(url, payload)
+    except OSError:  # urllib.error.URLError and friends are all OSError
+        sleeper(2)
+        data = opener(url, payload)
+
+    if not data.get("ok"):
+        raise RuntimeError(
+            f"telegram sendMessage failed: {data.get('description') or data}"
+        )
+    return data
+
+
 def send(
     chat_id: str,
     text: str,
     reply_to: int | None = None,
     *,
+    prefix: str = "",
     token: str | None = None,
     poster=None,
 ) -> list[dict]:
@@ -60,8 +80,9 @@ def send(
     url = API.format(token=token)
 
     results = []
-    for i, part in enumerate(chunk(text)):
-        payload: dict = {"chat_id": chat_id, "text": part}
+    # Every chunk carries the prefix, so a split message stays identifiable.
+    for i, part in enumerate(chunk(text, LIMIT - len(prefix))):
+        payload: dict = {"chat_id": chat_id, "text": prefix + part}
         # Thread only the first chunk, matching the plugin's own 'first' mode.
         if reply_to is not None and i == 0:
             payload["reply_parameters"] = {"message_id": reply_to}

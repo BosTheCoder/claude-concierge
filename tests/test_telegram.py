@@ -64,3 +64,48 @@ def test_send_threads_only_the_first_chunk():
     assert len(calls) == 2
     assert calls[0]["reply_parameters"] == {"message_id": 42}
     assert "reply_parameters" not in calls[1]
+
+
+def test_send_prefixes_every_chunk_not_just_the_first():
+    calls = []
+
+    def poster(url, payload):
+        calls.append(payload["text"])
+        return {"ok": True}
+
+    telegram.send("999", "e" * 5000, prefix="[A3] ", token="T", poster=poster)
+
+    assert len(calls) == 2
+    assert all(part.startswith("[A3] ") for part in calls)
+    assert all(len(part) <= telegram.LIMIT for part in calls)
+
+
+def test_post_raises_on_an_ok_false_body():
+    def opener(url, payload):
+        return {"ok": False, "description": "chat not found"}
+
+    with pytest.raises(RuntimeError, match="chat not found"):
+        telegram._post("u", {}, opener=opener, sleeper=lambda s: None)
+
+
+def test_post_retries_once_after_a_transport_error():
+    attempts = []
+    slept = []
+
+    def opener(url, payload):
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise OSError("connection reset")
+        return {"ok": True}
+
+    assert telegram._post("u", {}, opener=opener, sleeper=slept.append) == {"ok": True}
+    assert len(attempts) == 2
+    assert slept == [2]
+
+
+def test_post_gives_up_after_the_second_transport_error():
+    def opener(url, payload):
+        raise OSError("still down")
+
+    with pytest.raises(OSError, match="still down"):
+        telegram._post("u", {}, opener=opener, sleeper=lambda s: None)

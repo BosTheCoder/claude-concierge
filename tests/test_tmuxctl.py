@@ -48,6 +48,41 @@ def test_build_shell_command_survives_a_single_quote_in_the_title():
     assert "Bos" in cmd and cmd.startswith("cd /tmp && exec claude ")
 
 
+def test_build_shell_command_exports_env_before_exec():
+    cmd = tmuxctl.build_shell_command(
+        "/tmp", ["claude", "brief"], {"CONCIERGE_JOB_ID": "A3"}
+    )
+    assert cmd == "cd /tmp && CONCIERGE_JOB_ID=A3 exec claude brief"
+
+
+def test_build_shell_command_quotes_env_values():
+    cmd = tmuxctl.build_shell_command("/tmp", ["claude"], {"X": "a b"})
+    assert "X='a b' exec claude" in cmd
+
+
+def test_build_shell_command_without_env_is_unchanged():
+    assert tmuxctl.build_shell_command("/tmp", ["claude"]) == "cd /tmp && exec claude"
+
+
+def test_window_command_reads_the_pane_command():
+    run = fake_runner(stdout="claude\n")
+    assert tmuxctl.window_command("concierge", "0", runner=run) == "claude"
+    assert run.calls[0] == [
+        "tmux", "list-panes", "-t", "concierge:0",
+        "-F", "#{pane_current_command}",
+    ]
+
+
+def test_window_command_returns_none_when_the_window_is_gone():
+    assert tmuxctl.window_command("concierge", "0", runner=fake_runner(returncode=1)) \
+        is None
+
+
+def test_window_command_returns_none_on_empty_output():
+    assert tmuxctl.window_command("concierge", "0", runner=fake_runner(stdout="\n")) \
+        is None
+
+
 def test_has_session_true_on_exit_zero():
     run = fake_runner(returncode=0)
     assert tmuxctl.has_session("concierge", runner=run) is True

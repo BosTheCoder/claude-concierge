@@ -21,9 +21,20 @@ def extract_rc_url(pane_text: str) -> str | None:
     return matches[-1].rstrip(".,);]'\"")
 
 
-def build_shell_command(cwd: str, argv: list[str]) -> str:
+def build_shell_command(
+    cwd: str, argv: list[str], env: dict[str, str] | None = None
+) -> str:
+    """Build the shell line tmux runs for a window.
+
+    `env` becomes assignment prefixes on the `exec`, which every POSIX shell
+    exports into the replacing process. This is how a job learns its own id:
+    an env var survives context compaction, a system prompt does not.
+    """
     quoted = " ".join(shlex.quote(a) for a in argv)
-    return f"cd {shlex.quote(cwd)} && exec {quoted}"
+    assignments = "".join(
+        f"{name}={shlex.quote(value)} " for name, value in (env or {}).items()
+    )
+    return f"cd {shlex.quote(cwd)} && {assignments}exec {quoted}"
 
 
 def has_session(session: str, *, runner=None) -> bool:
@@ -58,6 +69,24 @@ def list_windows(session: str, *, runner=None) -> list[str]:
         "tmux", "list-windows", "-t", session, "-F", "#{window_name}"
     ]).stdout
     return [line for line in (out or "").splitlines() if line]
+
+
+def window_command(session: str, window: str, *, runner=None) -> str | None:
+    """The command currently running in that window's pane, or None.
+
+    'Session exists' is not liveness: every job is a window in the same
+    session, so a live job keeps the session up long after window 0's claude
+    process has died.
+    """
+    runner = runner or _run
+    result = runner([
+        "tmux", "list-panes", "-t", f"{session}:{window}",
+        "-F", "#{pane_current_command}",
+    ])
+    if result.returncode != 0:
+        return None
+    lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
+    return lines[0] if lines else None
 
 
 def capture(session: str, window: str, *, runner=None) -> str:
