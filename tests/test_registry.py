@@ -28,15 +28,23 @@ def test_allocate_id_avoids_active_jobs(state):
     assert registry.allocate_id(jobs) not in {"A0", "A1"}
 
 
-def test_allocate_id_may_reuse_a_finished_id(state):
-    # 240 ids exist; only finished ones are reusable, so with every id but one
-    # taken by an active job the allocator must return that one.
-    jobs = {}
-    for letter in registry.config.ID_LETTERS:
-        for digit in registry.config.ID_DIGITS:
-            jobs[f"{letter}{digit}"] = {"status": "running"}
-    jobs["M7"]["status"] = "done"
-    assert registry.allocate_id(jobs) == "M7"
+def test_allocate_id_never_reuses_a_finished_id(state):
+    # A done job's tmux window is still open, so recycling its id would make
+    # capture-pane, upsert and /kill all target the wrong session.
+    jobs = {"A0": {"status": "done"}, "A1": {"status": "killed"}}
+    assert registry.allocate_id(jobs) not in {"A0", "A1"}
+
+
+def test_allocate_id_raises_when_every_id_is_in_the_registry(state):
+    # Every id present but all finished: still no free id, because only the
+    # 7-day prune returns ids to the pool.
+    jobs = {
+        f"{letter}{digit}": {"status": "done"}
+        for letter in registry.config.ID_LETTERS
+        for digit in registry.config.ID_DIGITS
+    }
+    with pytest.raises(RuntimeError, match="no free job id"):
+        registry.allocate_id(jobs)
 
 
 def test_allocate_id_raises_when_all_ids_active(state):
@@ -60,6 +68,28 @@ def test_upsert_creates_and_merges(state):
 def test_upsert_stamps_last_update(state):
     registry.upsert("B7", state, status="running")
     assert "last_update" in registry.load(state)["B7"]
+
+
+def test_last_chat_is_none_before_anything_is_remembered(state):
+    assert registry.last_chat(state) is None
+
+
+def test_remember_chat_roundtrips_beside_the_registry(state):
+    registry.remember_chat("999", state)
+    assert registry.last_chat(state) == "999"
+    assert (state.parent / "last_chat").exists()
+
+
+def test_remember_chat_overwrites_with_the_latest(state):
+    registry.remember_chat("111", state)
+    registry.remember_chat("222", state)
+    assert registry.last_chat(state) == "222"
+
+
+def test_remember_chat_leaves_no_temp_files(state):
+    registry.remember_chat("999", state)
+    leftovers = [p.name for p in state.parent.iterdir() if p.name != "last_chat"]
+    assert leftovers == []
 
 
 def test_active_filters_terminal_statuses(state):

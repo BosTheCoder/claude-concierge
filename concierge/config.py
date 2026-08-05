@@ -3,6 +3,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 STATE_FILE = REPO / "state" / "jobs.json"
+# Where the supervisor's own alerts go when the registry is empty — a fresh
+# install, or the morning after the 7-day prune cleared it.
+LAST_CHAT_FILE = REPO / "state" / "last_chat"
 PROMPTS_DIR = REPO / "prompts"
 
 TELEGRAM_ENV = Path.home() / ".claude" / "channels" / "telegram" / ".env"
