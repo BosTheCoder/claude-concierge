@@ -57,3 +57,39 @@ def test_notify_raises_for_an_unknown_job(tmp_path):
     with pytest.raises(KeyError, match="ZZ"):
         cli.notify("ZZ", "hi", file=None, status=None,
                    state_path=tmp_path / "jobs.json")
+
+
+def test_format_status_includes_the_remote_control_url():
+    now = datetime(2026, 8, 5, 15, 0, tzinfo=timezone.utc)
+    job = {
+        "id": "A3", "title": "calibre cleanup", "status": "running",
+        "opened_at": "2026-08-05T14:00:00+00:00",
+        "rc_url": "https://claude.ai/code/session_abc",
+    }
+    out = cli.format_status(job, now)
+    assert "[A3] calibre cleanup — running · 1h" in out
+    assert out.splitlines()[-1] == "https://claude.ai/code/session_abc"
+
+
+def test_format_status_falls_back_when_there_is_no_rc_url():
+    now = datetime(2026, 8, 5, 15, 0, tzinfo=timezone.utc)
+    job = {
+        "id": "A3", "title": "calibre cleanup", "status": "running",
+        "opened_at": "2026-08-05T14:00:00+00:00",
+        "rc_url": None,
+    }
+    out = cli.format_status(job, now)
+    assert "None" not in out
+    assert 'find it as "[A3] calibre cleanup" in claude.ai/code' in out
+
+
+def test_format_status_reports_a_done_job_rather_than_treating_it_as_missing():
+    now = datetime(2026, 8, 5, 15, 0, tzinfo=timezone.utc)
+    job = {
+        "id": "Z9", "title": "old job", "status": "done",
+        "opened_at": "2026-08-01T09:00:00+00:00",
+        "rc_url": "https://claude.ai/code/session_old",
+    }
+    out = cli.format_status(job, now)
+    assert "[Z9] old job — done ·" in out
+    assert "https://claude.ai/code/session_old" in out

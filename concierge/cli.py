@@ -23,6 +23,18 @@ def format_jobs(jobs: dict, now: datetime) -> str:
     )
 
 
+def format_status(job: dict, now: datetime) -> str:
+    lines = [
+        f"[{job['id']}] {job['title']} — {job['status']} · "
+        f"{humanize_age(job['opened_at'], now)}"
+    ]
+    if job.get("rc_url"):
+        lines.append(job["rc_url"])
+    else:
+        lines.append(f"no remote-control link — find it as \"[{job['id']}] {job['title']}\" in claude.ai/code")
+    return "\n".join(lines)
+
+
 def notify(
     job_id: str,
     text: str,
@@ -74,6 +86,14 @@ def kill_cmd(job_id: str):
     tmuxctl.kill_window(config.TMUX_SESSION, jobs[job_id]["tmux_window"])
     registry.upsert(job_id, status="killed")
     typer.echo(f"[{job_id}] killed")
+
+
+@app.command("status")
+def status_cmd(job_id: str):
+    jobs = registry.load()
+    if job_id not in jobs:
+        raise typer.BadParameter(f"unknown job: {job_id}")
+    typer.echo(format_status(jobs[job_id], datetime.now(timezone.utc)))
 
 
 @app.command("spawn")

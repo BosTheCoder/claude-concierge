@@ -57,7 +57,7 @@ To pass a message to a running job, send keys to its tmux window:
 ## Commands
 
 - `/jobs` — run `bin/concierge jobs` and send the output
-- `/status A3` — that job's state and its Remote Control link
+- `/status A3` — run `bin/concierge status A3` and send the output
 - `/kill A3` — run `bin/concierge kill A3`
 - `/new` — reset your own conversation; the registry is untouched
 - `/rc` — re-send your own Remote Control link
