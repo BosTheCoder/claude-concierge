@@ -2,5 +2,13 @@
 # Stable entry point for job sessions and the concierge. Jobs call:
 #   concierge notify A3 "done" --file report.md --status done
 set -euo pipefail
+
+# The scheduled tasks reach this through `wsl.exe -- …`, which runs no login
+# shell and no ~/.zshrc, so PATH is the bare system default and `uv` is not on
+# it. Everything the concierge starts inherits this environment — tmux, and
+# through it `claude` and the channel plugin's `bun server.ts` — so this is the
+# one place worth fixing. uv: ~/.local/bin, claude+node: brew, bun: ~/.bun/bin.
+export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:$HOME/.bun/bin:$PATH"
+
 exec uv run --project "$HOME/projects/personal/claude-concierge" \
     python -m concierge.cli "$@"
