@@ -93,5 +93,12 @@ def spawn_cmd(
     typer.echo(job.get("rc_url") or "")
 
 
+@app.command("ensure-up")
+def ensure_up_cmd():
+    from concierge import supervisor
+
+    typer.echo(supervisor.ensure_up())
+
+
 if __name__ == "__main__":
     app()
