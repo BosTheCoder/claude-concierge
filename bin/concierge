@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stable entry point for job sessions and the concierge. Jobs call:
+#   concierge notify A3 "done" --file report.md --status done
+set -euo pipefail
+exec uv run --project "$HOME/projects/personal/claude-concierge" \
+    python -m concierge.cli "$@"
