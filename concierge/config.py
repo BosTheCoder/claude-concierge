@@ -1,3 +1,5 @@
+import json
+import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -14,6 +16,23 @@ TASKS_REPO = Path.home() / "projects" / "personal" / "tasks"
 NPM_REPO = Path.home() / "projects" / "personal" / "nyakundi-property-management"
 
 TMUX_SESSION = "concierge"
+
+# Both sessions run in bypass. The design assumed the permission relay would
+# carry each prompt to the phone; in practice one ordinary job produced enough
+# prompts to make the chat unusable, and a prompt nobody answers is a hung job.
+# `auto` (classifier-gated, prompts only on genuinely risky calls) is one env
+# var away: CONCIERGE_PERMISSION_MODE=auto.
+PERMISSION_MODE = os.environ.get("CONCIERGE_PERMISSION_MODE", "bypassPermissions")
+
+# Telegram allows exactly one getUpdates consumer per bot token, and the channel
+# plugin starts a poller in *every* session that loads it — so any ordinary
+# `claude` session would SIGTERM the concierge's poller and silently take over
+# the bot. The plugin is therefore disabled at user scope (see
+# ~/.claude/setup-plugins.sh) and switched on here, for this session only.
+TELEGRAM_PLUGIN = "telegram@claude-plugins-official"
+CONCIERGE_SETTINGS = json.dumps(
+    {"enabledPlugins": {TELEGRAM_PLUGIN: True}}, separators=(",", ":")
+)
 
 ACTIVE_STATUSES = frozenset({"running", "waiting"})
 

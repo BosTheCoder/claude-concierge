@@ -24,7 +24,13 @@ def test_claude_argv_states_the_job_id_at_the_top_of_the_brief():
     assert argv[-1] == "Your job id is A3.\n\nthe brief"
 
 
-def test_claude_argv_never_skips_permissions():
+def test_claude_argv_runs_in_the_configured_permission_mode():
+    argv = spawn.claude_argv("A3", "t", "b", Path("/p/job.md"))
+    assert argv[argv.index("--permission-mode") + 1] == config.PERMISSION_MODE
+
+
+def test_claude_argv_uses_the_mode_flag_not_the_dangerous_one():
+    """--permission-mode is per-session and reversible; the other flag is neither."""
     argv = spawn.claude_argv("A3", "t", "b", Path("/p/job.md"))
     assert "--dangerously-skip-permissions" not in argv
 

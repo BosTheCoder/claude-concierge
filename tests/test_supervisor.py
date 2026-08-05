@@ -1,6 +1,7 @@
+import json
 from datetime import datetime, timedelta, timezone
 import pytest
-from concierge import registry, supervisor
+from concierge import config, registry, supervisor
 
 
 def test_blocking_env_finds_the_remote_control_killers():
@@ -22,6 +23,18 @@ def test_concierge_argv_enables_the_channel_and_remote_control():
         "plugin:telegram@claude-plugins-official"
     assert argv[argv.index("--remote-control") + 1] == "concierge"
     assert "--dangerously-skip-permissions" not in argv
+
+
+def test_concierge_argv_runs_in_the_configured_permission_mode():
+    argv = supervisor.concierge_argv()
+    assert argv[argv.index("--permission-mode") + 1] == config.PERMISSION_MODE
+
+
+def test_concierge_argv_turns_the_telegram_plugin_on_for_itself_only():
+    """Disabled at user scope so no other session can steal the bot's poller."""
+    argv = supervisor.concierge_argv()
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["enabledPlugins"][config.TELEGRAM_PLUGIN] is True
 
 
 def test_reconcile_flags_running_jobs_whose_window_is_gone():

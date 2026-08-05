@@ -16,6 +16,8 @@ def claude_argv(job_id: str, title: str, brief: str, prompt_file: Path) -> list[
         "claude",
         "--remote-control",
         f"[{job_id}] {title}",
+        "--permission-mode",
+        config.PERMISSION_MODE,
         "--append-system-prompt-file",
         str(prompt_file),
         f"Your job id is {job_id}.\n\n{brief}",

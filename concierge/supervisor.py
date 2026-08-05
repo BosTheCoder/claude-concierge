@@ -21,10 +21,14 @@ def blocking_env(env: dict) -> list[str]:
 def concierge_argv() -> list[str]:
     return [
         "claude",
+        "--settings",
+        config.CONCIERGE_SETTINGS,
         "--channels",
-        "plugin:telegram@claude-plugins-official",
+        f"plugin:{config.TELEGRAM_PLUGIN}",
         "--remote-control",
         "concierge",
+        "--permission-mode",
+        config.PERMISSION_MODE,
         "--append-system-prompt-file",
         str(config.PROMPTS_DIR / "concierge.md"),
     ]
