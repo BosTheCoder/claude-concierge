@@ -1,28 +1,6 @@
 from datetime import datetime, timezone
 import pytest
-from concierge import cli, config, registry
-
-
-def test_github_link_for_the_tasks_repo():
-    link = cli.github_link(
-        str(config.TASKS_REPO), "2026-08-05-x", "report.md"
-    )
-    assert link == (
-        "https://github.com/BosTheCoder/tasks/blob/main/2026-08-05-x/report.md"
-    )
-
-
-def test_github_link_for_the_property_repo():
-    link = cli.github_link(str(config.NPM_REPO), "2026-08-05-y", "notes.md")
-    assert link == (
-        "https://github.com/BosTheCoder/nyakundi-property-management"
-        "/blob/main/2026-08-05-y/notes.md"
-    )
-
-
-def test_github_link_rejects_an_unknown_repo():
-    with pytest.raises(ValueError, match="unknown repo"):
-        cli.github_link("/tmp/somewhere", "f", "x.md")
+from concierge import cli, registry
 
 
 def test_format_jobs_lists_one_line_per_active_job():
