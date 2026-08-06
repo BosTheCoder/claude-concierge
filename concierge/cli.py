@@ -200,6 +200,7 @@ def ensure_up_cmd():
 
     typer.echo(supervisor.ensure_up())
     typer.echo(run_heartbeat())
+    typer.echo(run_lanes())
 
 
 @app.command("heartbeat")
@@ -216,6 +217,22 @@ def heartbeat_cmd(
     typer.echo(hb.run_if_due())
 
 
+@app.command("lanes")
+def lanes_cmd(
+    dry_run: bool = typer.Option(False, help="Ask each lane to plan without acting"),
+):
+    """Run the fast lanes now (normally ridden by ensure-up)."""
+    from concierge import lanes as lanes_mod
+
+    configured = lanes_mod.LANES
+    if dry_run:
+        configured = tuple(
+            lanes_mod.Lane(lane.name, lane.command + ("--dry-run",))
+            for lane in configured
+        )
+    typer.echo(lanes_mod.run_all(configured))
+
+
 def run_heartbeat() -> str:
     """The heartbeat rides ensure-up (see heartbeat.py) rather than taking a
     scheduled task of its own. It must never be able to take the concierge
@@ -228,6 +245,20 @@ def run_heartbeat() -> str:
         return heartbeat.run_if_due()
     except Exception as exc:  # noqa: BLE001 - deliberately total
         return f"heartbeat-error: {exc}"
+
+
+def run_lanes() -> str:
+    """Fast lanes ride ensure-up too (see lanes.py). Same total guard as the
+    heartbeat, and for a stronger reason: these ones act on the outside world,
+    so a bug here is exactly the sort of thing that must not also take the
+    concierge down with it.
+    """
+    try:
+        from concierge import lanes
+
+        return lanes.run_all()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"lanes-error: {exc}"
 
 
 if __name__ == "__main__":

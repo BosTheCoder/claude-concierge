@@ -215,7 +215,7 @@ def test_recovery_clears_the_cooldown_so_the_next_failure_is_not_swallowed(tmp_p
 def test_each_watch_has_its_own_cooldown(tmp_path):
     other = heartbeat.Watch(
         name="job-tracker flush", url="u", kind="flush", max_age_hours=30,
-        expected="daily at 09:00 and 18:00",
+        expected="daily at 21:00",
     )
     sent = []
     out = heartbeat.run_if_due(

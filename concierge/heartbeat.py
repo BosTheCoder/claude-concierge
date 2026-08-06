@@ -74,10 +74,16 @@ class Watch:
     expected: str
 
 
-# job-tracker sources at 04:00 and flushes at 09:00 and 18:00. 30h of slack
-# covers a run delayed by `start_when_available` after the PC was off
-# overnight, while still firing within a day of a genuine stoppage. A machine
-# switched off for a whole day SHOULD alert — that is a real gap in sourcing.
+# job-tracker sources at 04:00 and applies at 21:00. 30h of slack covers a run
+# delayed by `start_when_available` after the PC was off overnight, while still
+# firing within a day of a genuine stoppage. A machine switched off for a whole
+# day SHOULD alert — that is a real gap in sourcing.
+#
+# The `flush` watch now really means the ATS apply task (Apply2100), which logs
+# a run every night whether or not it had anything to do. Since 2026-08-07 the
+# REPLY half is the mechanical send lane on this same ensure-up tick — if that
+# stops, ensure-up has stopped, and then nothing here is running either, so
+# there is nothing useful for a watch to say about it.
 WATCHES: tuple[Watch, ...] = (
     Watch(
         name="job-tracker sourcing",
@@ -91,7 +97,7 @@ WATCHES: tuple[Watch, ...] = (
         url="http://localhost:8000/api/runs?kind=flush&limit=10",
         kind="flush",
         max_age_hours=30,
-        expected="daily at 09:00 and 18:00",
+        expected="daily at 21:00",
     ),
 )
 
