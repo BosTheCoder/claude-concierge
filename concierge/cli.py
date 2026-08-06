@@ -199,6 +199,35 @@ def ensure_up_cmd():
     from concierge import supervisor
 
     typer.echo(supervisor.ensure_up())
+    typer.echo(run_heartbeat())
+
+
+@app.command("heartbeat")
+def heartbeat_cmd(
+    force: bool = typer.Option(False, help="Poll now, ignoring the hourly interval"),
+):
+    """Check that the scheduled jobs we watch are still actually running."""
+    from concierge import heartbeat as hb
+
+    state = hb.load_state()
+    if force:
+        state.pop("last_poll", None)
+        hb.save_state(state)
+    typer.echo(hb.run_if_due())
+
+
+def run_heartbeat() -> str:
+    """The heartbeat rides ensure-up (see heartbeat.py) rather than taking a
+    scheduled task of its own. It must never be able to take the concierge
+    watchdog down with it — keeping the concierge alive is the job that
+    matters, and a broken heartbeat is not worth failing that over.
+    """
+    try:
+        from concierge import heartbeat
+
+        return heartbeat.run_if_due()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"heartbeat-error: {exc}"
 
 
 if __name__ == "__main__":

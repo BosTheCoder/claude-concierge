@@ -8,6 +8,8 @@ STATE_FILE = REPO / "state" / "jobs.json"
 # Where the supervisor's own alerts go when the registry is empty — a fresh
 # install, or the morning after the 7-day prune cleared it.
 LAST_CHAT_FILE = REPO / "state" / "last_chat"
+# Poll/alert timestamps for the scheduled-run heartbeat (heartbeat.py).
+HEARTBEAT_FILE = REPO / "state" / "heartbeat.json"
 PROMPTS_DIR = REPO / "prompts"
 
 TELEGRAM_ENV = Path.home() / ".claude" / "channels" / "telegram" / ".env"
