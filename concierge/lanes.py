@@ -53,6 +53,12 @@ LANES: tuple[Lane, ...] = (
             str(Path.home() / "projects/personal/job-tracker/scripts/send-approved.sh"),
         ),
     ),
+    Lane(
+        name="job-tracker inbound",
+        command=(
+            str(Path.home() / "projects/personal/job-tracker/scripts/inbound.sh"),
+        ),
+    ),
 )
 
 

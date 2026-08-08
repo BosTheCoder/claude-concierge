@@ -143,8 +143,17 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
 
 
 def test_the_shipped_lane_points_at_the_job_tracker_sender():
-    assert len(lanes.LANES) == 1
+    assert len(lanes.LANES) == 2
     assert lanes.LANES[0].command[0].endswith("job-tracker/scripts/send-approved.sh")
+    assert lanes.LANES[1].command[0].endswith("job-tracker/scripts/inbound.sh")
+
+
+def test_both_job_tracker_lanes_are_registered():
+    """Outbound and inbound are separate processes on the same tick: the send
+    lane has no model in it and must stay that way."""
+    names = [lane.name for lane in lanes.LANES]
+    assert "job-tracker replies" in names
+    assert "job-tracker inbound" in names
 
 
 @pytest.mark.parametrize("lane", lanes.LANES)
