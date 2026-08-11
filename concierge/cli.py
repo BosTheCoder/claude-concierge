@@ -242,6 +242,15 @@ def rc_cmd():
     typer.echo(rc.sweep())
 
 
+@app.command("sessions")
+def sessions_cmd():
+    """Which Claude Code sessions are on Remote Control, and which have fallen
+    off. Read-only — this is the question, `rc` is the fix."""
+    from concierge import rc
+
+    typer.echo(rc.report())
+
+
 def run_rc() -> str:
     """The Remote Control sweep rides ensure-up as well, and runs before the
     heartbeat and the lanes because a concierge that is up but unreachable from

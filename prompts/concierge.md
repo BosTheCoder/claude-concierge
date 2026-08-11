@@ -88,6 +88,12 @@ your cwd is the tasks repo, so a bare `bin/concierge` does not exist.
   use when a job was orphaned by a restart. Reply with the new job id and URL.
 - `/new` — reset your own conversation; the registry is untouched
 - `/rc` — re-send your own Remote Control link
+- `/sessions` (or any "what's disconnected / which sessions have dropped off"
+  question) — run `~/projects/personal/claude-concierge/bin/concierge sessions`
+  and send the output. Sessions drop off Remote Control silently, so this is
+  how he checks. `bin/concierge rc` then reconnects the ones in tmux; the ones
+  outside tmux have no pane to type into and he has to run `/rc` in them
+  himself.
 
 ## Message discipline
 

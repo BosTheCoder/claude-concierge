@@ -105,6 +105,20 @@ def capture_pane_escaped(pane: str, *, runner=None) -> str:
     return runner(["tmux", "capture-pane", "-pe", "-t", pane]).stdout
 
 
+def pane_command(pane: str, *, runner=None) -> str | None:
+    """What that pane is currently running, or None if it is gone.
+
+    A Claude Code session can hand its terminal to a shell and say so in the
+    registry (`status: "shell"`). Typing "/rc" then executes it as a shell
+    command instead. This is the ground truth the registry only reports.
+    """
+    runner = runner or _run
+    result = runner(["tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}"])
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
 def send_keys(pane: str, *keys: str, runner=None) -> bool:
     """Type into a pane by pane id. False when tmux refused.
 

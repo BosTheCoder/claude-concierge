@@ -105,19 +105,26 @@ class Session:
 
     @property
     def pane(self) -> str | None:
-        """'concierge:@0.%0' -> '%0', and only for windows we own.
+        """'concierge:@0.%0' -> '%0', for any tmux session, not just ours.
 
-        Pane ids are globally unique and fixed for the pane's life, which
-        window indexes are not — a window closing renumbers its neighbours,
-        and send-keys to a renumbered index types into the wrong session.
+        Ad-hoc windows drop off the bridge exactly as concierge ones do, and a
+        pane is a pane — the guards that make typing into one safe (registry
+        says it is down, nothing else on the pane is connected, the box holds
+        no unsent text, the pane is actually running Claude Code) do not care
+        whose tmux session it belongs to.
+
+        Pane ids rather than window indexes: indexes renumber when a window
+        closes, and the cost of typing into the wrong Claude Code session is
+        that it acts on it.
         """
         if not self.tmux:
             return None
-        session, _, rest = self.tmux.partition(":")
-        if session != config.TMUX_SESSION:
-            return None
-        pane = rest.rpartition(".")[2]
+        pane = self.tmux.rpartition(".")[2]
         return pane if pane.startswith("%") else None
+
+    @property
+    def tmux_session(self) -> str | None:
+        return self.tmux.partition(":")[0] if self.tmux else None
 
     def age_seconds(self, now: datetime) -> float:
         if not self.started_at:
@@ -253,6 +260,40 @@ def _in_cooldown(state: dict, key: str, now: datetime) -> bool:
 # --- the sweep --------------------------------------------------------------
 
 
+def report(
+    *,
+    sessions_dir: Path | None = None,
+    proc_start=read_proc_start,
+) -> str:
+    """Read-only: which sessions are on the bridge and which have fallen off.
+
+    The sweep fixes what it can reach; this answers "what's disconnected?"
+    asked from the phone, including the ad-hoc sessions it cannot fix. Kept to
+    a couple of lines because the answer is read in a chat window.
+    """
+    live = [
+        s
+        for s in load_sessions(sessions_dir)
+        if s.participates and is_running(s, proc_start)
+    ]
+    if not live:
+        return "no Claude Code sessions running"
+
+    connected_panes = {s.pane for s in live if s.connected and s.pane}
+    down = [s for s in live if not s.connected and s.pane not in connected_panes]
+    count = f"{len(live)} session{'' if len(live) == 1 else 's'}"
+    if not down:
+        return f"{count}, all connected"
+
+    def describe(s: Session) -> str:
+        where = f"tmux {s.tmux_session}" if s.pane else "not in tmux — run /rc there"
+        return f"{s.name} ({where})"
+
+    return f"{count}, {len(live) - len(down)} connected. Down: " + ", ".join(
+        describe(s) for s in down
+    )
+
+
 def _default_notifier(message: str, state_path: Path | None = None) -> None:
     from concierge import supervisor
 
@@ -319,16 +360,33 @@ def sweep(
     for session in down:
         key = f"{session.name}:{session.pid}"
         if not session.pane:
-            # Not one of ours — an ordinary terminal session, which has no pane
-            # we may safely type into. Say so and leave it to him.
+            # A plain terminal session. There is no pane to type into and no
+            # safe way to reach its stdin, so this one really is his to fix —
+            # a peer message reaches the session but arrives as text, and a
+            # slash command sent that way is not executed (tested 2026-08-11).
             alert(
                 key,
-                f"{session.name} has dropped off Remote Control and isn't a "
-                f"concierge window, so I can't reconnect it — run /rc in that "
-                f"session ({session.cwd}).",
+                f"{session.name} has dropped off Remote Control and isn't "
+                f"running under tmux, so there's no pane for me to type into — "
+                f"run /rc in that session ({session.cwd}).",
                 once=True,
             )
-            outcomes.append(f"{session.name}: not ours")
+            outcomes.append(f"{session.name}: no tmux pane")
+            continue
+
+        running = tmux.pane_command(session.pane)
+        if not running or "claude" not in running:
+            # The session handed its terminal to a shell, so "/rc" would be run
+            # as a shell command. Seen on a real session sitting at `status:
+            # "shell"` — harmless but useless, and it would loop forever.
+            alert(
+                key,
+                f"{session.name} has dropped off Remote Control, but its pane "
+                f"is running {running or 'nothing'} rather than Claude Code, so "
+                f"I can't reconnect it from here.",
+                once=True,
+            )
+            outcomes.append(f"{session.name}: pane not at the REPL")
             continue
 
         typed = input_box_content(tmux.capture_pane_escaped(session.pane))

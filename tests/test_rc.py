@@ -127,10 +127,12 @@ def test_pane_is_taken_from_the_tmux_field(tmp_path):
     assert session.pane == "%7"
 
 
-def test_a_pane_in_someone_elses_tmux_session_is_not_ours(tmp_path):
-    write_session(tmp_path, 100, tmux="work:@0.%0")
+def test_a_pane_in_another_tmux_session_is_still_addressable(tmp_path):
+    """Ad-hoc windows drop off the bridge exactly as concierge ones do."""
+    write_session(tmp_path, 100, tmux="work:@0.%4")
     (session,) = rc.load_sessions(tmp_path)
-    assert session.pane is None
+    assert session.pane == "%4"
+    assert session.tmux_session == "work"
 
 
 def test_a_session_not_running_under_tmux_has_no_pane(tmp_path):
@@ -143,9 +145,13 @@ def test_a_session_not_running_under_tmux_has_no_pane(tmp_path):
 
 
 class FakeTmux:
-    def __init__(self, panes=None):
+    def __init__(self, panes=None, commands=None):
         self.panes = panes or {}
+        self.commands = commands or {}
         self.sent = []
+
+    def pane_command(self, pane, **kw):
+        return self.commands.get(pane, "claude")
 
     def capture_pane_escaped(self, pane, **kw):
         return self.panes.get(pane, EMPTY_BOX)
@@ -230,6 +236,31 @@ def test_a_subagent_on_a_genuinely_dead_pane_is_still_not_typed_into_twice(tmp_p
     assert tmux.sent == [("%0", ("/rc", "Enter"))]
 
 
+def test_sweep_reconnects_an_adhoc_window_outside_the_concierge_session(tmp_path):
+    write_session(tmp_path / "sessions", 100, tmux="work:@1.%9")
+    tmux = FakeTmux()
+
+    summary, notes = run_sweep(
+        tmp_path, tmux, pids=(100,), reconnect_on_wait=(100,)
+    )
+
+    assert tmux.sent == [("%9", ("/rc", "Enter"))]
+    assert "reconnected" in summary
+    assert notes == []
+
+
+def test_a_pane_that_handed_its_terminal_to_a_shell_is_not_typed_into(tmp_path):
+    """/rc there runs as a shell command. Seen on a real `status: shell` row."""
+    write_session(tmp_path / "sessions", 100)
+    tmux = FakeTmux(commands={"%100": "zsh"})
+
+    summary, notes = run_sweep(tmp_path, tmux, pids=(100,))
+
+    assert tmux.sent == []
+    assert "pane not at the REPL" in summary
+    assert "zsh" in notes[0]
+
+
 def test_sweep_leaves_connected_sessions_alone(tmp_path):
     write_session(tmp_path / "sessions", 100, bridgeSessionId="session_live")
     tmux = FakeTmux()
@@ -270,7 +301,7 @@ def test_sweep_cannot_type_into_a_session_outside_tmux_so_it_asks(tmp_path):
     summary, notes = run_sweep(tmp_path, tmux, pids=(100,))
 
     assert tmux.sent == []
-    assert "not ours" in summary
+    assert "no tmux pane" in summary
     assert "tasks-86" in notes[0] and "/rc" in notes[0]
 
 
@@ -284,6 +315,37 @@ def test_an_unfixable_session_is_mentioned_once_and_then_left_alone(tmp_path):
 
     assert len(first) == 1
     assert second == []
+
+
+# --- the report he can ask for from the phone -------------------------------
+
+
+def test_report_says_all_clear_when_every_session_is_on_the_bridge(tmp_path):
+    write_session(tmp_path, 100, bridgeSessionId="session_a")
+    write_session(tmp_path, 200, bridgeSessionId="session_b")
+    assert rc.report(sessions_dir=tmp_path, proc_start=proc_start_for(100, 200)) == (
+        "2 sessions, all connected"
+    )
+
+
+def test_report_names_what_is_down_and_whether_it_is_reachable(tmp_path):
+    write_session(tmp_path, 100, bridgeSessionId="session_a")
+    write_session(tmp_path, 200, tmux="work:@0.%2", name="tasks-93")
+    write_session(tmp_path, 300, tmux=None, name="npm-39")
+
+    line = rc.report(sessions_dir=tmp_path, proc_start=proc_start_for(100, 200, 300))
+
+    assert "3 sessions, 1 connected" in line
+    assert "tasks-93 (tmux work)" in line
+    assert "npm-39 (not in tmux — run /rc there)" in line
+
+
+def test_report_ignores_subagents_sharing_a_healthy_pane(tmp_path):
+    write_session(tmp_path, 100, bridgeSessionId="session_a", tmux="concierge:@0.%0")
+    write_subagent(tmp_path, 200, "concierge:@0.%0")
+    assert rc.report(sessions_dir=tmp_path, proc_start=proc_start_for(100, 200)) == (
+        "1 session, all connected"
+    )
 
 
 def test_a_broken_sweep_does_not_stop_the_concierge_coming_up(monkeypatch):
