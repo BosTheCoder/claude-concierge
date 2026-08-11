@@ -92,3 +92,25 @@ def window_command(session: str, window: str, *, runner=None) -> str | None:
 def capture(session: str, window: str, *, runner=None) -> str:
     runner = runner or _run
     return runner(["tmux", "capture-pane", "-p", "-t", f"{session}:{window}"]).stdout
+
+
+def capture_pane_escaped(pane: str, *, runner=None) -> str:
+    """Capture a pane by pane id, keeping its escape sequences.
+
+    `-e` is not decoration here: Claude Code draws the ghost of your last
+    message into the empty input box in dim SGR-2, and without the codes there
+    is no way to tell that ghost from text genuinely waiting to be sent.
+    """
+    runner = runner or _run
+    return runner(["tmux", "capture-pane", "-pe", "-t", pane]).stdout
+
+
+def send_keys(pane: str, *keys: str, runner=None) -> bool:
+    """Type into a pane by pane id. False when tmux refused.
+
+    Pane ids rather than window indexes: indexes shift when a window closes,
+    and the cost of typing into the wrong Claude Code session is that it acts
+    on it.
+    """
+    runner = runner or _run
+    return runner(["tmux", "send-keys", "-t", pane, *keys]).returncode == 0

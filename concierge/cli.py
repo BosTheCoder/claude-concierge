@@ -199,6 +199,7 @@ def ensure_up_cmd():
     from concierge import supervisor
 
     typer.echo(supervisor.ensure_up())
+    typer.echo(run_rc())
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
 
@@ -231,6 +232,29 @@ def lanes_cmd(
             for lane in configured
         )
     typer.echo(lanes_mod.run_all(configured))
+
+
+@app.command("rc")
+def rc_cmd():
+    """Reconnect any session that has dropped off Remote Control."""
+    from concierge import rc
+
+    typer.echo(rc.sweep())
+
+
+def run_rc() -> str:
+    """The Remote Control sweep rides ensure-up as well, and runs before the
+    heartbeat and the lanes because a concierge that is up but unreachable from
+    the phone is the failure this whole repo exists to prevent. Same total
+    guard as the others: a bug in the sweep must not stop the concierge coming
+    up, and typing into panes is exactly the sort of thing that can throw.
+    """
+    try:
+        from concierge import rc
+
+        return rc.sweep()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"rc-error: {exc}"
 
 
 def run_heartbeat() -> str:
