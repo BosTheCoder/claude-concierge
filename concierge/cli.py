@@ -242,6 +242,17 @@ def rc_cmd():
     typer.echo(rc.sweep())
 
 
+@app.command("rc-server")
+def rc_server_cmd():
+    """Keep `claude remote-control` up — the server that puts this machine in
+    the Claude app's device list. Its own scheduled tasks drive this; it is
+    deliberately not part of `ensure-up`, so a broken concierge cannot take the
+    machine off the app and a broken server cannot stop the concierge."""
+    from concierge import rcserver
+
+    typer.echo(rcserver.ensure_up())
+
+
 @app.command("sessions")
 def sessions_cmd():
     """Which Claude Code sessions are on Remote Control, and which have fallen
