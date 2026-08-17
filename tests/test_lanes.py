@@ -1,13 +1,12 @@
 """Fast lanes riding ensure-up.
 
-These lanes ACT on the outside world — job-tracker's reply lane sends real
-messages to real recruiters. So the bar here is higher than the heartbeat's:
+These lanes ACT on the outside world — a reply lane sends real messages to
+real people. So the bar here is higher than the heartbeat's:
 nothing a lane does, however badly, may stop the concierge from coming up, and
 a lane that isn't installed on this machine must be a non-event.
 """
 import subprocess
-
-import pytest
+from pathlib import Path
 
 from concierge import lanes
 
@@ -30,7 +29,7 @@ class FakeRun:
 
 
 def test_it_reports_the_lanes_last_line():
-    runner = FakeRun(stdout="send-lane: SENT Funding Circle\nsend-lane: sent 1\n")
+    runner = FakeRun(stdout="send-lane: SENT ACME Corp\nsend-lane: sent 1\n")
     assert lanes.run_lane(LANE, runner=runner) == "test lane: send-lane: sent 1"
 
 
@@ -140,25 +139,23 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
     assert printed == ["healthy", "rc: all connected", "not-due", "lanes ran"]
 
 
-# --- the shipped config -----------------------------------------------------
+# --- the wiring from concierge.toml -----------------------------------------
 
 
-def test_the_shipped_lane_points_at_the_job_tracker_sender():
-    assert len(lanes.LANES) == 2
-    assert lanes.LANES[0].command[0].endswith("job-tracker/scripts/send-approved.sh")
-    assert lanes.LANES[1].command[0].endswith("job-tracker/scripts/inbound.sh")
+def test_lanes_come_from_the_config_file():
+    """The declared lanes are what ensure-up runs. If this wiring breaks, every
+    lane stops firing and nothing says so — which is the exact failure mode the
+    heartbeat exists to catch for everyone else."""
+    from concierge import config
+
+    assert [lane.name for lane in lanes.LANES] == [
+        spec.name for spec in config.SETTINGS.lanes
+    ]
+    assert lanes.LANES, "the test fixture declares a lane"
 
 
-def test_both_job_tracker_lanes_are_registered():
-    """Outbound and inbound are separate processes on the same tick: the send
-    lane has no model in it and must stay that way."""
-    names = [lane.name for lane in lanes.LANES]
-    assert "job-tracker replies" in names
-    assert "job-tracker inbound" in names
+def test_a_configured_lane_keeps_its_arguments():
+    from concierge import settings
 
-
-@pytest.mark.parametrize("lane", lanes.LANES)
-def test_every_shipped_lane_is_actually_installed(lane):
-    # If this fails the lane silently stops running, which is the failure mode
-    # this whole project exists to stop happening quietly.
-    assert lane.available, f"{lane.name} missing at {lane.command[0]}"
+    parsed = settings.load(Path(__file__).parent / "fixture.toml")
+    assert parsed.lanes[0].command == ("/bin/true",)

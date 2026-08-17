@@ -90,7 +90,7 @@ def test_notify_with_a_file_appends_the_github_link(tmp_path, monkeypatch):
     state = tmp_path / "jobs.json"
     registry.upsert(
         "A3", state, id="A3", status="running", chat_id="9", title="t",
-        cwd=str(cli.config.TASKS_REPO), task_folder="2026-08-05-thing",
+        cwd=str(cli.config.REPOS[0].path), task_folder="2026-08-05-thing",
     )
 
     sent = []
@@ -102,7 +102,7 @@ def test_notify_with_a_file_appends_the_github_link(tmp_path, monkeypatch):
     cli.notify("A3", "done", file="report.md", status=None, state_path=state)
 
     assert sent[0] == (
-        "done\nhttps://github.com/BosTheCoder/tasks/blob/main/"
+        "done\nhttps://github.com/example/notes/blob/main/"
         "2026-08-05-thing/report.md"
     )
 
@@ -131,7 +131,7 @@ def test_notify_with_a_file_but_no_task_folder_never_links_to_none(
     state = tmp_path / "jobs.json"
     registry.upsert(
         "A3", state, id="A3", status="running", chat_id="9", title="t",
-        cwd=str(cli.config.TASKS_REPO), task_folder=None,
+        cwd=str(cli.config.REPOS[0].path), task_folder=None,
     )
 
     sent = []
@@ -170,7 +170,7 @@ def test_respawn_starts_a_fresh_job_from_the_stored_brief(tmp_path, monkeypatch)
     state = tmp_path / "jobs.json"
     registry.upsert(
         "A3", state, id="A3", status="orphaned", chat_id="9", title="calibre",
-        cwd=str(cli.config.TASKS_REPO), task_folder="2026-08-05-thing",
+        cwd=str(cli.config.REPOS[0].path), task_folder="2026-08-05-thing",
         brief="clean the epubs", root_message_id=4471,
     )
 
@@ -189,7 +189,7 @@ def test_respawn_starts_a_fresh_job_from_the_stored_brief(tmp_path, monkeypatch)
     assert calls[0]["brief"].endswith("clean the epubs")
     assert calls[0]["brief"].startswith("You are resuming an interrupted job.")
     assert calls[0]["title"] == "calibre"
-    assert calls[0]["cwd"] == str(cli.config.TASKS_REPO)
+    assert calls[0]["cwd"] == str(cli.config.REPOS[0].path)
     assert calls[0]["task_folder"] == "2026-08-05-thing"
     assert calls[0]["chat_id"] == "9"
     assert registry.load(state)["A3"]["status"] == "respawned"
@@ -198,7 +198,7 @@ def test_respawn_starts_a_fresh_job_from_the_stored_brief(tmp_path, monkeypatch)
 def test_respawn_refuses_a_job_with_no_stored_brief(tmp_path):
     state = tmp_path / "jobs.json"
     registry.upsert("A3", state, id="A3", status="orphaned", chat_id="9",
-                    title="t", cwd=str(cli.config.TASKS_REPO))
+                    title="t", cwd=str(cli.config.REPOS[0].path))
     with pytest.raises(ValueError, match="no brief or cwd stored"):
         cli.respawn("A3", state_path=state)
 

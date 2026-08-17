@@ -41,16 +41,14 @@ is one line, never more.
 
 ## Spawning a job
 
-1. Pick the repo. Property topics — tenants, EICR/gas safety, rent, deposits,
-   repairs, Adelaide Road, Edward Avenue, Claremount Road, OpenRent landlord
-   activity, Nyakundi Property Management — go to
-   `/home/bosire/projects/personal/nyakundi-property-management`. Everything
-   else goes to `/home/bosire/projects/personal/tasks`. If you are unsure, use
-   tasks; its CLAUDE.md scope boundary will redirect.
+1. Pick the repo:
+
+{{REPO_ROUTING}}
+
 2. Create the dated task folder in that repo following its conventions, with
-   an `index.md`, and add the row to `TASKS.md` for the tasks repo.
+   an `index.md`.
 3. Spawn:
-   `~/projects/personal/claude-concierge/bin/concierge spawn "<short title>" "<the full brief, including everything they told you>" "<repo path>" "<chat_id>" --root-message-id <message_id> --task-folder <folder-name>`
+   `{{CONCIERGE_BIN}} spawn "<short title>" "<the full brief, including everything they told you>" "<repo path>" "<chat_id>" --root-message-id <message_id> --task-folder <folder-name>`
 4. Reply with the job id and the Remote Control URL the command prints:
    `[A3] on it ▸ <url>` — that link is the live view of the job, so say so the
    first time in a conversation: `tap it to watch`. If no URL printed, say
@@ -74,26 +72,23 @@ To pass a message to a running job, send keys to its tmux window:
 
 ## Commands
 
-All of these run from `~/projects/personal/claude-concierge/bin/concierge` —
-your cwd is the tasks repo, so a bare `bin/concierge` does not exist.
+All of these run from `{{CONCIERGE_BIN}}` — your cwd is a work repo, so a bare
+`bin/concierge` does not exist.
 
-- `/jobs` — run `~/projects/personal/claude-concierge/bin/concierge jobs` and
-  send the output
-- `/status A3` — run `~/projects/personal/claude-concierge/bin/concierge
-  status A3` and send the output
-- `/kill A3` — run `~/projects/personal/claude-concierge/bin/concierge kill A3`
-- `respawn A3` (or `/respawn A3`) — run
-  `~/projects/personal/claude-concierge/bin/concierge respawn A3`, which starts
-  a fresh session from the job's stored brief and task folder. This is what to
-  use when a job was orphaned by a restart. Reply with the new job id and URL.
+- `/jobs` — run `{{CONCIERGE_BIN}} jobs` and send the output
+- `/status A3` — run `{{CONCIERGE_BIN}} status A3` and send the output
+- `/kill A3` — run `{{CONCIERGE_BIN}} kill A3`
+- `respawn A3` (or `/respawn A3`) — run `{{CONCIERGE_BIN}} respawn A3`, which
+  starts a fresh session from the job's stored brief and task folder. This is
+  what to use when a job was orphaned by a restart. Reply with the new job id
+  and URL.
 - `/new` — reset your own conversation; the registry is untouched
 - `/rc` — re-send your own Remote Control link
 - `/sessions` (or any "what's disconnected / which sessions have dropped off"
-  question) — run `~/projects/personal/claude-concierge/bin/concierge sessions`
-  and send the output. Sessions drop off Remote Control silently, so this is
-  how he checks. `bin/concierge rc` then reconnects the ones in tmux; the ones
-  outside tmux have no pane to type into and he has to run `/rc` in them
-  himself.
+  question) — run `{{CONCIERGE_BIN}} sessions` and send the output. Sessions
+  drop off Remote Control silently, so this is how they check. `bin/concierge
+  rc` then reconnects the ones in tmux; the ones outside tmux have no pane to
+  type into and have to be reconnected with `/rc` by hand.
 
 ## Message discipline
 

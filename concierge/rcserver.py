@@ -9,18 +9,16 @@ keeping straight:
     bridge and types `/rc` to put it back.
   * this module runs `claude remote-control` in **server mode**, which is what
     puts the machine itself in the Claude app's device list. Sessions are then
-    created on demand from the phone, in TASKS_REPO, up to the CLI's default
-    capacity of 32.
+    created on demand from the phone, in the default repo, up to the CLI's
+    default capacity of 32.
 
-It was started by hand on 2026-08-12 and worked for a day, which is exactly
-the failure mode this repo exists to close: it does not survive a reboot, the
-nightly shutdown task, or `wsl --shutdown`. Hence a logon task and a
-five-minute watchdog, in their own `remote-control` wst namespace rather than
-riding the concierge's — a service should not be able to take another service
-down by failing to start.
+Started by hand it works until the next reboot, which is exactly the failure
+this repo exists to close. Hence a logon task and a five-minute watchdog, in
+their own scheduled-task namespace rather than riding the concierge's — a
+service should not be able to take another service down by failing to start.
 
-Health is read off the pane, and it has to be. Measured against a live server
-on 2026-08-13: the server process writes **no** row to ~/.claude/sessions, and
+Health is read off the pane, and it has to be. Measured against a live server:
+the server process writes **no** row to ~/.claude/sessions, and
 the sessions it spawns declare `entrypoint: "sdk-cli"` with the
 `bridgeSessionId` key *absent* rather than null. So the registry trick rc.py
 relies on has nothing to read here. (The same measurement is why rc.py is safe:
@@ -135,7 +133,9 @@ def _default_notifier(message: str, registry_path: Path | None = None) -> None:
 
 def _start(tmux) -> None:
     """Start the server window, whether or not the session is already there."""
-    shell_command = tmux.build_shell_command(str(config.TASKS_REPO), server_argv())
+    shell_command = tmux.build_shell_command(
+        str(config.SETTINGS.default_repo.path), server_argv()
+    )
     if not tmux.has_session(config.RC_SERVER_TMUX_SESSION):
         tmux.new_session(
             config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW, shell_command

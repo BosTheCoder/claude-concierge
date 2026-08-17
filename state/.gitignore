@@ -3,3 +3,4 @@ last_chat
 heartbeat.json
 rc.json
 rcserver.json
+*.rendered.md

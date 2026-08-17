@@ -3,12 +3,15 @@
 #   concierge notify A3 "done" --file report.md --status done
 set -euo pipefail
 
-# The scheduled tasks reach this through `wsl.exe -- …`, which runs no login
-# shell and no ~/.zshrc, so PATH is the bare system default and `uv` is not on
-# it. Everything the concierge starts inherits this environment — tmux, and
-# through it `claude` and the channel plugin's `bun server.ts` — so this is the
-# one place worth fixing. uv: ~/.local/bin, claude+node: brew, bun: ~/.bun/bin.
-export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:$HOME/.bun/bin:$PATH"
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-exec uv run --project "$HOME/projects/personal/claude-concierge" \
-    python -m concierge.cli "$@"
+# Scheduled tasks reach this without a login shell — on Windows, `wsl.exe -- …`
+# runs no ~/.zshrc at all — so PATH is the bare system default and `uv` is not
+# on it. Everything the concierge starts inherits this environment: tmux, and
+# through it `claude` and the channel plugin's `bun server.ts`. This is the one
+# place worth fixing, so add whatever your tools need here. Missing entries
+# cost nothing. Defaults cover uv (~/.local/bin), Homebrew/Linuxbrew (claude,
+# node) and bun.
+export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:$HOME/.bun/bin:$PATH"
+
+exec uv run --project "$REPO" python -m concierge.cli "$@"

@@ -1,0 +1,104 @@
+# claude-concierge configuration.
+#
+# Copy this file to `concierge.toml` and edit it. `concierge.toml` is
+# gitignored — nothing you put in it is ever committed. If it is absent the
+# concierge falls back to this example so a fresh clone still starts and the
+# test suite still runs, but spawning will refuse every path until you write
+# a real one.
+#
+# There are no secrets here. The Telegram bot token is read at runtime from
+# ~/.claude/channels/telegram/.env, which the telegram plugin writes.
+
+
+# --- repos ------------------------------------------------------------------
+#
+# The repos a job is allowed to run in. This is a whitelist, not a hint: a cwd
+# that is not listed is refused at spawn time, because tmux forking a shell
+# tells you nothing about whether the command survived, and a bad path makes
+# the window close instantly with no error anywhere.
+#
+# `topics` is prose, and it is pasted verbatim into the concierge's system
+# prompt. It is how the model decides where a message belongs, so write it the
+# way you would explain the split to a new assistant. A keyword list would only
+# be a worse version of the same guess.
+#
+# `default = true` marks where the concierge session itself runs, where
+# sessions started from the phone open, and where a job goes when the topic
+# doesn't obviously belong anywhere else. Exactly one repo should have it.
+
+[[repos]]
+name = "notes"
+path = "~/notes"
+github = "https://github.com/you/notes"
+topics = "anything that isn't covered by another repo — research, errands, one-off questions"
+default = true
+
+[[repos]]
+name = "side-project"
+path = "~/projects/side-project"
+github = "https://github.com/you/side-project"
+topics = "the web app — bugs, deploys, the database, anything about its users"
+
+
+# --- tmux -------------------------------------------------------------------
+
+[tmux]
+# Window 0 of this session is the concierge; every job gets its own window,
+# named after the job id.
+session = "concierge"
+
+
+# --- the Remote Control server ----------------------------------------------
+#
+# Optional, and a different thing from the concierge's own Remote Control link.
+# This is `claude remote-control` in server mode: what puts the machine itself
+# in the Claude app's device list, so you can start an ad-hoc session on it
+# from your phone. Supervised separately so neither service can take the other
+# down. Drive it with `concierge rc-server`; see docs/remote-control.md.
+
+[remote_control]
+session = "rc"
+window = "0"
+# What the machine is called in the Claude app. Defaults to the hostname.
+# name = "my-desktop"
+# "same-dir" opens phone-started sessions in the default repo. "worktree" gives
+# each its own git worktree, which is right for a codebase and pointless for a
+# notes repo.
+spawn_mode = "same-dir"
+
+
+# --- fast lanes -------------------------------------------------------------
+#
+# Work that has to happen within minutes rather than at a cron boundary. Each
+# lane is an external command that owns its own logic, locking and logging;
+# the concierge only invokes it on the five-minute `ensure-up` tick, bounds how
+# long it may take, and guarantees it cannot stop the concierge coming up.
+#
+# A lane whose command does not exist on this machine is skipped silently, so
+# it is safe to declare lanes for projects you have not checked out here.
+#
+# Delete this section if you have none.
+
+# [[lanes]]
+# name = "side-project outbound"
+# command = ["~/projects/side-project/scripts/flush.sh"]
+
+
+# --- heartbeat watches ------------------------------------------------------
+#
+# Scheduled work elsewhere that is supposed to keep happening, watched from
+# outside so that "no run happened" is noticed — the failure mode that a
+# service's own dashboard structurally cannot report, because the dashboard
+# lives inside the thing that stopped.
+#
+# `url` must return {"data": [run, ...]} newest-first, each run carrying
+# `kind`, `ok` and `finished_at`. Polled hourly with a 12h alert cooldown.
+#
+# Delete this section if you have none.
+
+# [[watches]]
+# name = "side-project nightly crawl"
+# url = "http://localhost:8000/api/runs?kind=source&limit=10"
+# kind = "source"
+# max_age_hours = 30          # slack for the machine being off overnight
+# expected = "daily at 04:00"  # quoted back to you in the alert

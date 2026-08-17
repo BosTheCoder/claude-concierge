@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from concierge import config, registry, tmuxctl
+from concierge import config, registry, settings, tmuxctl
 
 
 def claude_argv(job_id: str, title: str, brief: str, prompt_file: Path) -> list[str]:
@@ -25,14 +25,13 @@ def claude_argv(job_id: str, title: str, brief: str, prompt_file: Path) -> list[
 
 
 def resolve_cwd(cwd: str) -> Path:
-    """Reject anything that is not one of the two permitted repos.
+    """Reject anything that is not one of the repos in concierge.toml.
 
     tmux forking a shell says nothing about the command surviving: a bad path
     makes `cd` fail, `&&` short-circuit, and the window close instantly.
     """
     resolved = Path(cwd).expanduser().resolve()
-    permitted = {config.TASKS_REPO.resolve(), config.NPM_REPO.resolve()}
-    if resolved not in permitted:
+    if resolved not in config.SETTINGS.repo_paths():
         raise ValueError(f"cwd not a permitted repo: {cwd}")
     return resolved
 
@@ -86,7 +85,9 @@ def spawn_job(
     jobs = registry.load(state_path)
     job_id = registry.allocate_id(jobs)
 
-    prompt_file = config.PROMPTS_DIR / "job.md"
+    # Rendered rather than read straight from prompts/: the committed template
+    # names no one's paths, so this installation's own are pasted in here.
+    prompt_file = settings.render_prompt("job")
     argv = claude_argv(job_id, title, brief, prompt_file)
     tmux.new_window(
         config.TMUX_SESSION,

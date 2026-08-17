@@ -7,17 +7,20 @@ from pathlib import Path
 
 from concierge import config
 
-GITHUB = {
-    str(config.TASKS_REPO): "https://github.com/BosTheCoder/tasks",
-    str(config.NPM_REPO):
-        "https://github.com/BosTheCoder/nyakundi-property-management",
-}
+
+def github_base(cwd: str, repos=None) -> str | None:
+    """The GitHub URL configured for the repo at `cwd`, if there is one."""
+    target = Path(cwd).expanduser().resolve()
+    for repo in config.REPOS if repos is None else repos:
+        if repo.path.resolve() == target:
+            return repo.github
+    return None
 
 
-def github_link(cwd: str, task_folder: str, filename: str) -> str:
-    base = GITHUB.get(str(Path(cwd)))
+def github_link(cwd: str, task_folder: str, filename: str, repos=None) -> str:
+    base = github_base(cwd, repos)
     if not base:
-        raise ValueError(f"unknown repo: {cwd}")
+        raise ValueError(f"no github url configured for repo: {cwd}")
     return f"{base}/blob/main/{task_folder}/{filename}"
 
 

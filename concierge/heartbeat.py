@@ -1,24 +1,26 @@
 """Did the scheduled work actually happen?
 
-job-tracker had a `runs` table, a "Last automated run" stats card, a Runs page
-with live log tails, and a per-run summary email — and it was stone dead for
-13 days (2026-07-23 to 2026-08-05) without producing one signal, because every
-one of those lives INSIDE the thing that stopped running. The failure mode was
-never "a run went wrong". It was "no run happened", and nothing watched for
-absence.
+This exists because of a specific, boring disaster. A scheduled service had a
+`runs` table, a "last automated run" stats card, a runs page with live log
+tails, and a per-run summary email — and it was stone dead for thirteen days
+without producing a single signal, because every one of those lives INSIDE the
+thing that stopped running. The failure mode was never "a run went wrong". It
+was "no run happened", and nothing watched for absence.
 
 This watches for absence, from outside.
 
 It rides `ensure-up` rather than taking a scheduled task of its own. The
-Watchdog task calls `ensure-up` every 5 minutes and is the most reliably
-executed thing on this machine — it survives reboot, the nightly shutdown,
-crashes, `wsl --shutdown` and Claude Code updates. A separate task for the
-watchdog could rot silently in exactly the way it exists to detect, and then
-who watches the watcher. Riding a proven executor closes that loop.
+watchdog calls `ensure-up` every 5 minutes and is the most reliably executed
+thing on the machine — it survives reboots, crashes, and Claude Code updates.
+A separate task for the watchdog could rot silently in exactly the way it
+exists to detect, and then who watches the watcher. Riding a proven executor
+closes that loop.
 
 Cheap by construction: `ensure-up` fires 288 times a day, so the poll is rate
 limited to hourly and each alert has a cooldown, making a real outage nag
 twice a day instead of 288 times.
+
+Watches are declared in `concierge.toml`; with none declared this is a no-op.
 """
 
 from __future__ import annotations
@@ -62,9 +64,15 @@ class Problem:
 class Watch:
     """One scheduled thing that is supposed to keep happening.
 
-    `url` returns `{"data": [run, ...]}` newest-first, each run carrying
-    `kind`, `ok` and `finished_at` — job-tracker's `/api/runs` shape. Any
-    service that grows a runs endpoint can be added here as three lines.
+    `url` must return `{"data": [run, ...]}` newest-first, each run carrying
+    `kind`, `ok` and `finished_at`. Any service that grows a runs endpoint of
+    that shape can be watched by adding five lines to `concierge.toml`.
+
+    Pick `max_age_hours` with slack for the machine being off. A daily 04:00
+    job wants roughly 30h: enough to survive an overnight shutdown that delays
+    the run until morning, tight enough to still fire within a day of a
+    genuine stoppage. A machine switched off for a whole day SHOULD alert —
+    that is a real gap.
     """
 
     name: str
@@ -74,31 +82,15 @@ class Watch:
     expected: str
 
 
-# job-tracker sources at 04:00 and applies at 21:00. 30h of slack covers a run
-# delayed by `start_when_available` after the PC was off overnight, while still
-# firing within a day of a genuine stoppage. A machine switched off for a whole
-# day SHOULD alert — that is a real gap in sourcing.
-#
-# The `flush` watch now really means the ATS apply task (Apply2100), which logs
-# a run every night whether or not it had anything to do. Since 2026-08-07 the
-# REPLY half is the mechanical send lane on this same ensure-up tick — if that
-# stops, ensure-up has stopped, and then nothing here is running either, so
-# there is nothing useful for a watch to say about it.
-WATCHES: tuple[Watch, ...] = (
+WATCHES: tuple[Watch, ...] = tuple(
     Watch(
-        name="job-tracker sourcing",
-        url="http://localhost:8000/api/runs?kind=source&limit=10",
-        kind="source",
-        max_age_hours=30,
-        expected="daily at 04:00",
-    ),
-    Watch(
-        name="job-tracker flush",
-        url="http://localhost:8000/api/runs?kind=flush&limit=10",
-        kind="flush",
-        max_age_hours=30,
-        expected="daily at 21:00",
-    ),
+        name=spec.name,
+        url=spec.url,
+        kind=spec.kind,
+        max_age_hours=spec.max_age_hours,
+        expected=spec.expected,
+    )
+    for spec in config.SETTINGS.watches
 )
 
 

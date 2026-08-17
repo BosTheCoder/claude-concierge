@@ -4,26 +4,38 @@ from concierge import config
 from concierge.links import github_link, humanize_age
 
 
-def test_github_link_for_the_tasks_repo():
-    link = github_link(
-        str(config.TASKS_REPO), "2026-08-05-x", "report.md"
-    )
+def test_github_link_uses_the_url_configured_for_that_repo():
+    link = github_link(str(config.REPOS[0].path), "2026-08-05-x", "report.md")
     assert link == (
-        "https://github.com/BosTheCoder/tasks/blob/main/2026-08-05-x/report.md"
+        "https://github.com/example/notes/blob/main/2026-08-05-x/report.md"
     )
 
 
-def test_github_link_for_the_property_repo():
-    link = github_link(str(config.NPM_REPO), "2026-08-05-y", "notes.md")
-    assert link == (
-        "https://github.com/BosTheCoder/nyakundi-property-management"
-        "/blob/main/2026-08-05-y/notes.md"
+def test_each_repo_gets_its_own_url():
+    link = github_link(str(config.REPOS[1].path), "2026-08-05-y", "notes.md")
+    assert link.startswith("https://github.com/example/app/blob/main/")
+
+
+def test_github_link_matches_a_tilde_path_to_its_repo():
+    """The concierge is told to spawn with the path from the prompt, which is
+    written out in full; a job reporting back may pass either form."""
+    assert github_link("~/notes", "f", "x.md").startswith(
+        "https://github.com/example/notes"
     )
 
 
-def test_github_link_rejects_an_unknown_repo():
-    with pytest.raises(ValueError, match="unknown repo"):
+def test_github_link_rejects_an_unconfigured_repo():
+    with pytest.raises(ValueError, match="no github url"):
         github_link("/tmp/somewhere", "f", "x.md")
+
+
+def test_github_link_rejects_a_repo_with_no_url_configured():
+    from concierge.settings import Repo
+    from pathlib import Path
+
+    repos = (Repo(name="local", path=Path("/tmp/local-only"), github=None),)
+    with pytest.raises(ValueError, match="no github url"):
+        github_link("/tmp/local-only", "f", "x.md", repos=repos)
 
 
 def test_humanize_age_in_minutes():

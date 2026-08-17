@@ -1,3 +1,10 @@
 __pycache__/
 .venv/
 *.egg-info/
+.pytest_cache/
+
+# This installation's own config — its repos, lanes and watches. Never
+# committed; concierge.example.toml is the template.
+concierge.toml
+
+logs/

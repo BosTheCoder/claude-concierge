@@ -2,8 +2,9 @@ from pathlib import Path
 import pytest
 from concierge import config, registry, spawn
 
-TASKS = str(config.TASKS_REPO)
-NPM = str(config.NPM_REPO)
+NOTES, APP = config.REPOS[0], config.REPOS[1]
+TASKS = str(NOTES.path)
+NPM = str(APP.path)
 
 
 def test_claude_argv_names_the_session_with_the_job_id():
@@ -44,13 +45,13 @@ def test_session_id_is_none_without_a_url():
     assert spawn.session_id_from_url(None) is None
 
 
-def test_resolve_cwd_accepts_both_permitted_repos():
-    assert spawn.resolve_cwd(TASKS) == config.TASKS_REPO.resolve()
-    assert spawn.resolve_cwd(NPM) == config.NPM_REPO.resolve()
+def test_resolve_cwd_accepts_every_configured_repo():
+    assert spawn.resolve_cwd(TASKS) == NOTES.path.resolve()
+    assert spawn.resolve_cwd(NPM) == APP.path.resolve()
 
 
 def test_resolve_cwd_expands_a_tilde_path():
-    assert spawn.resolve_cwd("~/projects/personal/tasks") == config.TASKS_REPO.resolve()
+    assert spawn.resolve_cwd("~/notes") == NOTES.path.resolve()
 
 
 def test_resolve_cwd_rejects_anything_else():

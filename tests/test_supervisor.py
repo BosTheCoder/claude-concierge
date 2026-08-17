@@ -14,7 +14,7 @@ def test_blocking_env_ignores_an_empty_value():
 
 
 def test_blocking_env_clean_environment_returns_nothing():
-    assert supervisor.blocking_env({"PATH": "/bin", "HOME": "/home/bosire"}) == []
+    assert supervisor.blocking_env({"PATH": "/bin", "HOME": "/home/dev"}) == []
 
 
 def test_concierge_argv_enables_the_channel_and_remote_control():

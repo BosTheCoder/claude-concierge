@@ -52,7 +52,7 @@ def write_session(directory, pid, **overrides):
         "procStart": str(pid * 100),
         "startedAt": STARTED,
         "name": f"session-{pid}",
-        "cwd": "/home/bosire/projects/personal/tasks",
+        "cwd": "/home/dev/notes",
         "tmux": f"concierge:@0.%{pid}",
         "entrypoint": "cli",
         "bridgeSessionId": None,
@@ -65,7 +65,7 @@ def write_session(directory, pid, **overrides):
 
 def write_subagent(directory, pid, pane):
     """A claude-mem observer: SDK-spawned, sharing its parent's pane, and with
-    no bridgeSessionId key at all. Shape copied from a real row on 2026-08-11.
+    no bridgeSessionId key at all. Shape copied from a real row.
     """
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{pid}.json").write_text(
@@ -75,7 +75,7 @@ def write_subagent(directory, pid, pane):
                 "procStart": str(pid * 100),
                 "startedAt": STARTED,
                 "name": f"observer-sessions-{pid}",
-                "cwd": "/home/bosire/.claude-mem/observer-sessions",
+                "cwd": "/home/dev/.claude-mem/observer-sessions",
                 "entrypoint": "sdk-cli",
                 "tmux": pane,
             }

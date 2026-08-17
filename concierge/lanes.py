@@ -2,20 +2,21 @@
 
 Some jobs are crawls — nothing to subscribe to, a nightly sweep is the right
 shape. Others are reactions to something a person did, where the whole value is
-that the gap is short. job-tracker's reply lane is the second kind: a recruiter
-message approved at 09:05 used to wait until 18:00 to go out, because sending
-was bolted onto the same twice-daily `claude -p` run that did the sourcing.
+that the gap is short. A reply lane is the second kind: a message approved at
+09:05 should not wait until the evening batch to go out because sending happens
+to be bolted onto the same twice-daily run that did the fetching.
 
 Those lanes live here, and they ride `ensure-up` for the same reason the
-heartbeat does: the Watchdog task calls it every five minutes and is the most
-reliably executed thing on this machine. A dedicated scheduled task for each
-fast lane is another thing that can rot silently, and job-tracker already lost
-13 days to exactly that.
+heartbeat does: the watchdog calls it every five minutes and is the most
+reliably executed thing on the machine. A dedicated scheduled task per fast
+lane is another thing that can rot silently, which is the failure this repo
+exists to stop.
 
 This module does not know how to send anything. Each lane is an external
 command that owns its own logic, its own locking and its own logging; all this
 does is invoke it, bound how long it may take, and make absolutely sure it
-cannot stop the concierge from coming up.
+cannot stop the concierge from coming up. Lanes are declared in
+`concierge.toml`; with none declared this is a no-op.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from concierge import config
 
 # Hard ceiling per lane. `ensure-up` runs every 5 minutes and its real job is
 # keeping the concierge alive, so a wedged lane gets cut off well before the
@@ -40,25 +43,14 @@ class Lane:
 
     @property
     def available(self) -> bool:
-        """False when the repo isn't checked out on this machine. A missing
-        lane is a non-event, not an error — the concierge is not job-tracker's
-        installer."""
+        """False when the lane's project isn't checked out on this machine. A
+        missing lane is a non-event, not an error — the concierge is not the
+        installer for the things it runs."""
         return Path(self.command[0]).exists()
 
 
-LANES: tuple[Lane, ...] = (
-    Lane(
-        name="job-tracker replies",
-        command=(
-            str(Path.home() / "projects/personal/job-tracker/scripts/send-approved.sh"),
-        ),
-    ),
-    Lane(
-        name="job-tracker inbound",
-        command=(
-            str(Path.home() / "projects/personal/job-tracker/scripts/inbound.sh"),
-        ),
-    ),
+LANES: tuple[Lane, ...] = tuple(
+    Lane(name=spec.name, command=spec.command) for spec in config.SETTINGS.lanes
 )
 
 

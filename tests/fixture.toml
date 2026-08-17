@@ -1,0 +1,36 @@
+# The config the test suite runs against, so the tests assert on this file
+# rather than on whatever the machine they run on happens to be configured for.
+# conftest.py points CONCIERGE_CONFIG at it before concierge.config is imported.
+
+[[repos]]
+name = "notes"
+path = "~/notes"
+github = "https://github.com/example/notes"
+topics = "everything that isn't the app"
+default = true
+
+[[repos]]
+name = "app"
+path = "~/projects/app"
+github = "https://github.com/example/app"
+topics = "the web app — bugs, deploys, its users"
+
+[tmux]
+session = "concierge"
+
+[remote_control]
+session = "rc"
+window = "0"
+name = "test-box"
+spawn_mode = "same-dir"
+
+[[lanes]]
+name = "app outbound"
+command = ["/bin/true"]
+
+[[watches]]
+name = "app nightly"
+url = "http://localhost:9999/api/runs?kind=source&limit=10"
+kind = "source"
+max_age_hours = 30
+expected = "daily at 04:00"

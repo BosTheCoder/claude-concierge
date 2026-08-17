@@ -4,16 +4,16 @@ import pytest
 
 from concierge import config, rcserver
 
-# Captured from a live `claude remote-control` on 2026-08-13. The banner above
+# Captured from a live `claude remote-control`. The banner above
 # the status line is the point: "Connecting" stays on screen for the life of
 # the server, so these are not interchangeable with hand-written fragments.
 CONNECTED = """\
 Remote Control v2.1.231
 Connecting to claude.ai...
 
-·✔︎· Connected · tasks · main
+·✔︎· Connected · notes · main
     Capacity: 1/32 · New sessions will be created in the current directory
-    Bos-Desktop
+    test-box
 
 Continue coding in the Claude mobile app or https://claude.ai/code?environment=env_01H
 space to show QR code · w to toggle spawn mode
@@ -142,7 +142,7 @@ def test_starts_the_server_when_there_is_no_session(state):
     ]
     started = shlex.split(tmux.started[0].split("&&", 1)[1].replace("exec ", "", 1))
     assert started[:2] == ["claude", "remote-control"]
-    assert str(config.TASKS_REPO) in tmux.started[0]
+    assert str(config.SETTINGS.default_repo.path) in tmux.started[0]
     assert notes == []
 
 

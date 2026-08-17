@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from concierge import config, registry, telegram, tmuxctl
+from concierge import config, registry, settings, telegram, tmuxctl
 
 
 def blocking_env(env: dict) -> list[str]:
@@ -30,7 +30,7 @@ def concierge_argv() -> list[str]:
         "--permission-mode",
         config.PERMISSION_MODE,
         "--append-system-prompt-file",
-        str(config.PROMPTS_DIR / "concierge.md"),
+        str(settings.render_prompt("concierge")),
     ]
 
 
@@ -110,7 +110,7 @@ def _start_concierge(tmux) -> None:
     so replace window 0 in place instead.
     """
     shell_command = tmux.build_shell_command(
-        str(config.TASKS_REPO), concierge_argv()
+        str(config.SETTINGS.default_repo.path), concierge_argv()
     )
     if not tmux.has_session(config.TMUX_SESSION):
         tmux.new_session(config.TMUX_SESSION, "0", shell_command)

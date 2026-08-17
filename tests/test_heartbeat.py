@@ -1,9 +1,9 @@
 """The scheduled-run heartbeat.
 
-job-tracker was dead for 13 days and every observability feature it had lived
-inside the process that had stopped. These tests are about the one thing that
-matters: noticing ABSENCE, from outside, without a new scheduled task that can
-rot the same way.
+A scheduled service was dead for thirteen days and every observability
+feature it had lived inside the process that had stopped. These tests are about
+the one thing that matters: noticing ABSENCE, from outside, without a new
+scheduled task that can rot the same way.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -15,7 +15,7 @@ from concierge import heartbeat
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
 
 WATCH = heartbeat.Watch(
-    name="job-tracker sourcing",
+    name="nightly crawl",
     url="http://localhost:8000/api/runs?kind=source",
     kind="source",
     max_age_hours=30,
@@ -62,8 +62,8 @@ def test_a_run_just_inside_the_window_is_silent():
 
 
 def test_the_actual_outage_would_have_fired():
-    # 2026-07-23 to 2026-08-05: the tasks fired on time and died instantly, so
-    # no run row was ever written. Absence is the whole signal.
+    # The real outage: the tasks fired on time and died instantly, so no run
+    # row was ever written. Absence is the whole signal.
     assert heartbeat.check(WATCH, NOW, fetch=feed(run(13 * 24))) is not None
 
 
@@ -214,7 +214,7 @@ def test_recovery_clears_the_cooldown_so_the_next_failure_is_not_swallowed(tmp_p
 
 def test_each_watch_has_its_own_cooldown(tmp_path):
     other = heartbeat.Watch(
-        name="job-tracker flush", url="u", kind="flush", max_age_hours=30,
+        name="nightly flush", url="u", kind="flush", max_age_hours=30,
         expected="daily at 21:00",
     )
     sent = []
@@ -223,7 +223,7 @@ def test_each_watch_has_its_own_cooldown(tmp_path):
         fetch=lambda url: [run(50), run(50, kind="flush")], notifier=sent.append,
     )
     assert out == "alerted:2"
-    assert {m.split(":")[0] for m in sent} == {"job-tracker sourcing", "job-tracker flush"}
+    assert {m.split(":")[0] for m in sent} == {"nightly crawl", "nightly flush"}
 
 
 def test_state_survives_a_corrupt_file(tmp_path):
@@ -313,16 +313,23 @@ def test_a_broken_heartbeat_does_not_break_ensure_up(monkeypatch):
     assert cli.run_heartbeat().startswith("heartbeat-error:")
 
 
-# --- the shipped config -----------------------------------------------------
+# --- the wiring from concierge.toml -----------------------------------------
 
 
-def test_the_shipped_watches_cover_both_job_tracker_halves():
-    # Sourcing dying and flushing dying are different failures with different
-    # consequences, and the message has to say which.
-    assert {w.kind for w in heartbeat.WATCHES} == {"source", "flush"}
+def test_watches_come_from_the_config_file():
+    """Every declared watch has to be polled. Two watches on one service are
+    two different failures — the crawl dying and the flush dying have different
+    consequences and the alert has to say which — so a wiring bug that dropped
+    one would silence exactly the half that mattered."""
+    from concierge import config
+
+    assert [(w.name, w.kind) for w in heartbeat.WATCHES] == [
+        (s.name, s.kind) for s in config.SETTINGS.watches
+    ]
+    assert heartbeat.WATCHES, "the test fixture declares a watch"
 
 
 @pytest.mark.parametrize("watch", heartbeat.WATCHES)
-def test_every_shipped_watch_tolerates_a_dead_service(watch):
+def test_every_configured_watch_tolerates_a_dead_service(watch):
     msg = text_of(heartbeat.check(watch, NOW, fetch=boom(OSError("refused"))))
     assert watch.name in msg
