@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from concierge import config, tmuxctl
@@ -45,6 +46,18 @@ from concierge import config, tmuxctl
 # "Connected", which is well past anything the CLI's own backoff recovers from.
 DEGRADED_STRIKES = 4
 TICK_MINUTES = 5
+
+# Every server start mints a fresh session about ten seconds later — measured
+# 2026-08-17, server up at 03:19:34 and cse_013ubZ2uJAa2vxwETaD43kmj at 03:19:44
+# — and each of those shows up in the Claude app as an empty "Bos-Desktop" chat.
+# So the restart rate IS the empty-chat rate, and until now nothing recorded it:
+# ensure_up runs 288 times a day, returns a string the wst task discards, and
+# only speaks on the four-strike path. When the app filled with empty chats the
+# history needed to explain it did not exist, and could not be reconstructed.
+#
+# Written on transitions only. Healthy ticks stay silent, which is nearly all of
+# them, so this cannot churn the state file.
+HISTORY_LIMIT = 40
 
 # Word boundaries because "Connecting" contains no "Connected" but the eye
 # does not have to be fooled for a substring check to be.
@@ -122,6 +135,21 @@ def save_state(state: dict, path: Path | None = None) -> None:
     p.write_text(json.dumps(state, indent=2, sort_keys=True))
 
 
+def _record(state: dict, event: str, detail: str = "", *, now: datetime | None = None) -> None:
+    """Append one transition to the bounded history. Mutates, does not save.
+
+    `why` is the useful half: "started" alone does not distinguish a reboot from
+    a window that had dropped to a shell from a four-strike recycle, and those
+    call for completely different fixes.
+    """
+    stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    history = state.setdefault("history", [])
+    history.append({"at": stamp, "event": event, "why": detail})
+    # Oldest first, so the tail is the recent past. 40 entries is weeks of a
+    # healthy server and still bounds a flapping one.
+    del history[:-HISTORY_LIMIT]
+
+
 # --- the supervisor ---------------------------------------------------------
 
 
@@ -160,6 +188,14 @@ def ensure_up(
     state = load_state(state_path)
 
     if not alive(tmux):
+        # Captured before _start, because _start is what makes it stop being
+        # true — and "was there a session at all" is the difference between a
+        # reboot and a window that quietly dropped to a shell.
+        why = (
+            "no tmux session"
+            if not tmux.has_session(config.RC_SERVER_TMUX_SESSION)
+            else "window not running claude"
+        )
         try:
             _start(tmux)
         except RuntimeError as exc:
@@ -170,6 +206,7 @@ def ensure_up(
             notifier(f"the Remote Control server failed to start: {exc}")
             raise
         state["strikes"] = 0
+        _record(state, "started", why)
         save_state(state, state_path)
         return "started"
 
@@ -184,12 +221,18 @@ def ensure_up(
 
     strikes = int(state.get("strikes") or 0) + 1
     state["strikes"] = strikes
+    if strikes == 1:
+        # First strike only. Recording all four would bury the incident count
+        # in repetition, and the first one is what carries the timestamp the
+        # backoff started from.
+        _record(state, "degraded", status)
     save_state(state, state_path)
     if strikes < DEGRADED_STRIKES:
         # Its own backoff usually wins from here. Say nothing yet.
         return f"degraded: {status} ({strikes}/{DEGRADED_STRIKES})"
 
     state["strikes"] = 0
+    _record(state, "recycled", f"{status} for {DEGRADED_STRIKES * TICK_MINUTES}m")
     save_state(state, state_path)
     try:
         _start(tmux)

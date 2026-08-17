@@ -234,3 +234,63 @@ def test_recovering_clears_the_strikes(state):
 
     tmux._pane = RECONNECTING
     assert run(tmux, state)[0].endswith(f"(1/{rcserver.DEGRADED_STRIKES})")
+
+
+# --- restart history --------------------------------------------------------
+#
+# Every server start mints a fresh session ~10s later, which the Claude app
+# shows as an empty chat. So the restart rate is the empty-chat rate, and these
+# assert that rate is actually recoverable after the fact.
+
+
+def _history(state):
+    return rcserver.load_state(state).get("history", [])
+
+
+def test_a_healthy_server_writes_no_history(state):
+    """288 ticks a day. If healthy ones recorded, the file would be nothing but
+    noise and the real transitions would be unfindable."""
+    tmux = FakeTmux(
+        sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="claude", pane=CONNECTED
+    )
+    for _ in range(5):
+        run(tmux, state)
+
+    assert _history(state) == []
+
+
+def test_a_recycle_is_recorded_with_what_the_pane_said(state):
+    """"Restarted" alone does not distinguish a reboot from a four-strike
+    recycle, and they call for different fixes."""
+    tmux = FakeTmux(
+        sessions={config.RC_SERVER_TMUX_SESSION},
+        window_cmd="claude",
+        pane=RECONNECTING,
+    )
+    for _ in range(rcserver.DEGRADED_STRIKES):
+        run(tmux, state)
+
+    events = [entry["event"] for entry in _history(state)]
+    assert events == ["degraded", "recycled"]
+    assert "reconnecting" in _history(state)[-1]["why"]
+
+
+def test_a_start_records_whether_there_was_a_session_at_all(state):
+    """A missing tmux session is a reboot or a wsl --shutdown; a session whose
+    window fell back to a shell is the server having exited under us."""
+    run(FakeTmux(), state)
+    assert _history(state)[-1]["why"] == "no tmux session"
+
+    dropped = FakeTmux(sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="zsh")
+    run(dropped, state)
+    assert _history(state)[-1]["why"] == "window not running claude"
+
+
+def test_history_is_bounded(state):
+    """A server flapping every five minutes must not grow the state file without
+    limit — it is read by hand."""
+    tmux = FakeTmux(sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="zsh")
+    for _ in range(rcserver.HISTORY_LIMIT + 15):
+        run(tmux, state)
+
+    assert len(_history(state)) == rcserver.HISTORY_LIMIT
