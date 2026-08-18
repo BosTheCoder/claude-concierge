@@ -51,6 +51,29 @@ def new_session(session: str, window: str, shell_command: str, *, runner=None) -
         raise RuntimeError(f"tmux new-session failed: {result.stderr.strip()}")
 
 
+def pipe_pane(session: str, window: str, command: str, *, runner=None) -> bool:
+    """Copy a pane's output to `command`, leaving the pane's process alone.
+
+    Not a pipeline in the shell line, which is the obvious alternative and is
+    wrong: measured 2026-08-18, `exec claude ... | tee log` makes tmux report
+    `#{pane_current_command}` as the SHELL, so rcserver.alive() — which tests
+    for "claude" in that string — would return False on every tick and recycle
+    the server every five minutes forever. Redirecting to a file instead is
+    equally wrong in the other direction: it empties the pane that
+    rcserver.pane_status() reads to decide whether the server is healthy.
+
+    pipe-pane touches neither. -O sends only output, so nothing is written back
+    into the pane.
+
+    Best-effort: losing the copy is not a reason to fail a server start.
+    """
+    runner = runner or _run
+    return (
+        runner(["tmux", "pipe-pane", "-O", "-t", f"{session}:{window}", command]).returncode
+        == 0
+    )
+
+
 def new_window(session: str, window: str, shell_command: str, *, runner=None) -> None:
     runner = runner or _run
     result = runner(["tmux", "new-window", "-t", session, "-n", window, shell_command])

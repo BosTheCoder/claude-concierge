@@ -144,3 +144,20 @@ def test_kill_window_targets_session_and_window():
     run = fake_runner()
     tmuxctl.kill_window("concierge", "A3", runner=run)
     assert run.calls[0] == ["tmux", "kill-window", "-t", "concierge:A3"]
+
+
+def test_pipe_pane_sends_output_only():
+    """-O is not optional. Without it tmux also pipes the command's output back
+    INTO the pane, so `cat >> log` would echo the server's own status line at it
+    and pane_status() would be reading its own tail."""
+    run = fake_runner()
+    tmuxctl.pipe_pane("rc", "0", "cat >> /x/rcserver.log", runner=run)
+    assert run.calls[0] == [
+        "tmux", "pipe-pane", "-O", "-t", "rc:0", "cat >> /x/rcserver.log"
+    ]
+
+
+def test_pipe_pane_reports_failure_without_raising():
+    """A lost log copy must not fail a server start — the server matters, the
+    diagnostic does not."""
+    assert tmuxctl.pipe_pane("rc", "0", "cat", runner=fake_runner(returncode=1)) is False

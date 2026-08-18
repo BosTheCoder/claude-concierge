@@ -16,6 +16,11 @@ LAST_CHAT_FILE = REPO / "state" / "last_chat"
 HEARTBEAT_FILE = REPO / "state" / "heartbeat.json"
 # Consecutive-strike counter for the Remote Control server (rcserver.py).
 RC_SERVER_FILE = REPO / "state" / "rcserver.json"
+# Copy of the Remote Control server's pane output. The server exits on its own
+# every few hours; tmux destroys a single-window session when its process dies,
+# so the window closes and takes the reason with it. This is the only place that
+# survives the exit.
+RC_SERVER_LOG = REPO / "state" / "rcserver.log"
 PROMPTS_DIR = settings_mod.PROMPTS_DIR
 
 TELEGRAM_ENV = Path.home() / ".claude" / "channels" / "telegram" / ".env"

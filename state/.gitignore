@@ -4,3 +4,4 @@ heartbeat.json
 rc.json
 rcserver.json
 *.rendered.md
+rcserver.log

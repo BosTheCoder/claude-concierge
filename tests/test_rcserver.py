@@ -40,6 +40,7 @@ class FakeTmux:
         self._windows = list(windows)
         self.calls = []
         self.started = []
+        self.piped = []
 
     def has_session(self, session):
         return session in self.sessions
@@ -64,6 +65,11 @@ class FakeTmux:
 
     def kill_window(self, session, window):
         self.calls.append(("kill_window", session, window))
+
+    def pipe_pane(self, session, window, command):
+        self.calls.append(("pipe_pane", session, window))
+        self.piped.append(command)
+        return True
 
 
 @pytest.fixture
@@ -138,7 +144,8 @@ def test_starts_the_server_when_there_is_no_session(state):
 
     assert result == "started"
     assert tmux.calls == [
-        ("new_session", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW)
+        ("new_session", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW),
+        ("pipe_pane", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW),
     ]
     started = shlex.split(tmux.started[0].split("&&", 1)[1].replace("exec ", "", 1))
     assert started[:2] == ["claude", "remote-control"]
@@ -156,6 +163,8 @@ def test_replaces_a_dead_window_without_killing_the_session(state):
     assert tmux.calls == [
         ("kill_window", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW),
         ("new_window", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW),
+        # Re-attached to the replacement window: pipe-pane is per-pane.
+        ("pipe_pane", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW),
     ]
 
 
@@ -294,3 +303,79 @@ def test_history_is_bounded(state):
         run(tmux, state)
 
     assert len(_history(state)) == rcserver.HISTORY_LIMIT
+
+
+# --- output capture ---------------------------------------------------------
+
+
+def test_the_replacement_window_also_gets_its_output_captured(state):
+    """pipe-pane is per-pane, not per-session, so a recycle that only re-attached
+    on the first start would go dark exactly when the server is misbehaving."""
+    tmux = FakeTmux(sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="zsh")
+    run(tmux, state)
+
+    assert tmux.calls[-1][0] == "pipe_pane"
+    assert str(config.RC_SERVER_LOG) in tmux.piped[-1]
+
+
+def test_capture_appends_rather_than_truncating(state):
+    """Truncating would race the exit we are trying to catch: the server dies,
+    the watchdog restarts it, and the restart erases the last words."""
+    tmux = FakeTmux()
+    run(tmux, state)
+
+    assert ">>" in tmux.piped[-1]
+
+
+def test_the_capture_log_is_trimmed_to_its_tail(tmp_path):
+    """41 MB/day measured. Unbounded logging into the guest is what the WSL
+    diagnosis blamed for the journald storm."""
+    log = tmp_path / "rcserver.log"
+    log.write_bytes(b"x" * (rcserver.LOG_TAIL_BYTES * 3))
+
+    rcserver._trim_log(log)
+
+    assert log.stat().st_size <= rcserver.LOG_TAIL_BYTES
+
+
+def test_trimming_keeps_the_end_not_the_beginning(tmp_path):
+    """The server's last words before it exits are the whole point."""
+    log = tmp_path / "rcserver.log"
+    log.write_bytes(b"OLDEST\n" + b"y" * rcserver.LOG_TAIL_BYTES + b"\nNEWEST\n")
+
+    rcserver._trim_log(log)
+
+    body = log.read_bytes()
+    assert body.endswith(b"NEWEST\n")
+    assert b"OLDEST" not in body
+
+
+def test_an_already_open_writer_survives_the_trim(tmp_path):
+    """pipe-pane's `cat >>` holds the file open for the life of the server.
+    Recreating the path would leave that writer appending to an unlinked inode:
+    the log stops growing and the failure looks exactly like a healthy quiet
+    server. So drive the real seam — hold an fd across the trim and check its
+    writes still land at the path.
+
+    Asserting st_ino instead does NOT catch this: the freed inode is routinely
+    handed straight back, so the number matches and the test passes green
+    against the broken version. Verified 2026-08-18.
+    """
+    log = tmp_path / "rcserver.log"
+    log.write_bytes(b"z" * (rcserver.LOG_TAIL_BYTES * 2))
+
+    with log.open("ab") as writer:  # stands in for pipe-pane's `cat >>`
+        rcserver._trim_log(log)
+        writer.write(b"AFTER-TRIM\n")
+        writer.flush()
+
+    assert log.read_bytes().endswith(b"AFTER-TRIM\n")
+
+
+def test_a_small_log_is_left_alone(tmp_path):
+    log = tmp_path / "rcserver.log"
+    log.write_bytes(b"short\n")
+
+    rcserver._trim_log(log)
+
+    assert log.read_bytes() == b"short\n"

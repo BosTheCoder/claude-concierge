@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +59,14 @@ TICK_MINUTES = 5
 # Written on transitions only. Healthy ticks stay silent, which is nearly all of
 # them, so this cannot churn the state file.
 HISTORY_LIMIT = 40
+
+# Cap for the captured pane log. The server repaints its status line
+# continuously and each repaint is a full ANSI redraw — measured 2026-08-18 at
+# 15,000 bytes per 30 seconds, about 41 MB/day. Unbounded logging into the guest
+# is the exact shape of the journald write storm in the 11 Aug WSL diagnosis, so
+# the file is trimmed to its tail on every tick. The tail is the part worth
+# keeping: what we are after is the server's last words before it exits.
+LOG_TAIL_BYTES = 256 * 1024
 
 # Word boundaries because "Connecting" contains no "Connected" but the eye
 # does not have to be fooled for a substring check to be.
@@ -159,6 +168,29 @@ def _default_notifier(message: str, registry_path: Path | None = None) -> None:
     supervisor._default_notifier(message, registry_path)
 
 
+def _capture_output(tmux) -> None:
+    """Tee the new pane's output to RC_SERVER_LOG.
+
+    The server exits on its own every few hours — measured 2026-08-17, three
+    starts in a day, each minting an empty chat ~10s later — and when it does,
+    tmux destroys the single-window session and the pane scrollback goes with
+    it. So the one artefact that would say why is the one thing not kept.
+
+    `cat >>` rather than a log rotator: the volume is a status line, and a
+    truncating tool would race the very exit we are trying to catch.
+    """
+    log = config.RC_SERVER_LOG
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    tmux.pipe_pane(
+        config.RC_SERVER_TMUX_SESSION,
+        config.RC_SERVER_WINDOW,
+        f"cat >> {shlex.quote(str(log))}",
+    )
+
+
 def _start(tmux) -> None:
     """Start the server window, whether or not the session is already there."""
     shell_command = tmux.build_shell_command(
@@ -168,12 +200,42 @@ def _start(tmux) -> None:
         tmux.new_session(
             config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW, shell_command
         )
+        _capture_output(tmux)
         return
     if config.RC_SERVER_WINDOW in tmux.list_windows(config.RC_SERVER_TMUX_SESSION):
         tmux.kill_window(config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW)
     tmux.new_window(
         config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW, shell_command
     )
+    # Per-pane and not inherited, so it must be re-attached to every new window,
+    # not just the first.
+    _capture_output(tmux)
+
+
+def _trim_log(log: Path | None = None) -> None:
+    """Keep the last LOG_TAIL_BYTES of the capture file.
+
+    Rewrites in place rather than rotating: `cat >>` from pipe-pane holds the
+    file open, so renaming it would leave the writer appending to an unlinked
+    inode and the log would silently stop growing. Truncating from the front and
+    rewriting keeps the same inode and the same fd valid.
+    """
+    log = log or config.RC_SERVER_LOG
+    try:
+        if log.stat().st_size <= LOG_TAIL_BYTES:
+            return
+        with log.open("rb") as handle:
+            handle.seek(-LOG_TAIL_BYTES, 2)
+            tail = handle.read()
+    except OSError:
+        return
+    # Drop the partial first line so the file always starts mid-nothing.
+    _, _, rest = tail.partition(b"\n")
+    try:
+        with log.open("wb") as handle:
+            handle.write(rest or tail)
+    except OSError:
+        pass
 
 
 def ensure_up(
@@ -186,6 +248,9 @@ def ensure_up(
     """Idempotent, silent when healthy, safe to run every five minutes."""
     notifier = notifier or (lambda msg: _default_notifier(msg, registry_path))
     state = load_state(state_path)
+    # Every tick, not just restarts: the writer is the server itself and it does
+    # not stop between them.
+    _trim_log()
 
     if not alive(tmux):
         # Captured before _start, because _start is what makes it stop being
