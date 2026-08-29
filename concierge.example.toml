@@ -102,3 +102,28 @@ spawn_mode = "same-dir"
 # kind = "source"
 # max_age_hours = 30          # slack for the machine being off overnight
 # expected = "daily at 04:00"  # quoted back to you in the alert
+
+
+# --- closing finished jobs --------------------------------------------------
+#
+# `claude '<brief>'` does not exit when its turn ends; it drops to an
+# interactive REPL and holds ~350 MB there indefinitely. The reaper closes the
+# tmux window of a job that has stopped working. See docs/reaping.md.
+#
+# Defaults shown. Delete this section to accept them.
+
+# [reaper]
+# enabled = true
+#
+# # How long a job that reported done/failed keeps its window. Not zero: a
+# # follow-up message is typed into the job's own tmux window, so a window
+# # closed the instant it reports is a follow-up that lands nowhere.
+# finished_grace_minutes = 90
+#
+# # A job with status `waiting` is blocked on you, not finished. It is never
+# # reaped on the timer above. After this long with no reply it re-sends its
+# # question once...
+# waiting_nudge_hours = 24
+#
+# # ...and closes this long after that nudge if it is still unanswered.
+# waiting_grace_hours = 6

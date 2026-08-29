@@ -137,3 +137,30 @@ switched off for a whole day *should* alert. That's a real gap.
 
 `expected` is quoted back to you in the alert, so write it as you'd want to read
 it at 7am.
+
+## `[reaper]`
+
+Optional. When a job that has stopped working has its tmux window closed. See
+[reaping.md](reaping.md) for the rules and the guards.
+
+```toml
+[reaper]
+enabled = true
+finished_grace_minutes = 90
+waiting_nudge_hours = 24
+waiting_grace_hours = 6
+```
+
+`finished_grace_minutes` is how long a job that reported `done` or `failed`
+keeps its window. Not zero: a follow-up message from Telegram is typed into the
+job's own tmux window, so a window closed the instant it reports is a follow-up
+that lands nowhere. Shorten it if you never follow up; lengthen it if you often
+do.
+
+`waiting_*` apply only to a job whose status is `waiting`, which means blocked on
+you rather than finished. It is never closed on the timer above. After
+`waiting_nudge_hours` it re-sends its question into the conversation, and closes
+`waiting_grace_hours` after that if it is still unanswered.
+
+Values shown are the defaults. Omit the section to accept them; `enabled = false`
+turns the sweep off entirely and leaves the 7-day prune as the only cleanup.

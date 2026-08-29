@@ -74,8 +74,15 @@ def notify(
     )
     registry.remember_chat(job["chat_id"], state_path)
 
+    # Kept so the reaper can quote a blocked job's question back at him before
+    # closing it — a `waiting` job reaped silently loses whatever it asked.
+    # `last_update` moves with it, which is what both timers measure from.
+    fields = {"last_message": body[:1000]}
     if status:
-        registry.upsert(job_id, state_path, status=status)
+        fields["status"] = status
+        # A job that answers and goes back to work starts its wait afresh.
+        fields["nudged_at"] = None
+    registry.upsert(job_id, state_path, **fields)
 
 
 RESUME_PREFIX = (
@@ -200,6 +207,7 @@ def ensure_up_cmd():
 
     typer.echo(supervisor.ensure_up())
     typer.echo(run_rc())
+    typer.echo(run_reap())
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
 
@@ -232,6 +240,21 @@ def lanes_cmd(
             for lane in configured
         )
     typer.echo(lanes_mod.run_all(configured))
+
+
+@app.command("reap")
+def reap_cmd(
+    dry_run: bool = typer.Option(
+        False, help="Say what would be closed and why, without closing anything"
+    ),
+):
+    """Close the tmux window of a job that has stopped working.
+
+    Rides `ensure-up` every 5 minutes; this is the manual handle for looking at
+    what it thinks, and for forcing a sweep now."""
+    from concierge import reaper
+
+    typer.echo(reaper.report() if dry_run else reaper.run())
 
 
 @app.command("rc")
@@ -275,6 +298,21 @@ def run_rc() -> str:
         return rc.sweep()
     except Exception as exc:  # noqa: BLE001 - deliberately total
         return f"rc-error: {exc}"
+
+
+def run_reap() -> str:
+    """The reaper rides ensure-up for the same reason the heartbeat does: this
+    tick is the most reliably executed thing on the machine, and a reaper on
+    its own schedule is one more thing that can rot silently. Same total guard
+    — a bug in the sweep must never stop the concierge coming up, and this one
+    sends signals, so that matters more here than anywhere else.
+    """
+    try:
+        from concierge import reaper
+
+        return reaper.run()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"reap-error: {exc}"
 
 
 def run_heartbeat() -> str:

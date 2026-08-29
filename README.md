@@ -69,18 +69,22 @@ wrong, so a job structurally cannot message the wrong person.
 `ensure-up` is the only thing your scheduler needs to call. It is idempotent and
 silent when healthy, so running it every five minutes costs nothing and is the
 actual guarantee that the concierge comes back after a reboot, a crash, or a
-Claude Code update. It carries three passengers, each wrapped so that a failure
+Claude Code update. It carries four passengers, each wrapped so that a failure
 in one cannot stop the concierge from starting:
 
 - **[rc sweep](docs/remote-control.md):** sessions drop off Remote Control
   silently. This finds them and reconnects them.
+- **[reaper](docs/reaping.md):** a finished job leaves its REPL open, holding
+  most of a gigabyte. This closes the window once the job has gone quiet — and
+  never closes one that is still working, or one blocked waiting on you.
 - **[heartbeat](docs/heartbeat.md):** watches scheduled work *elsewhere* and
   tells you when a run didn't happen. A service's own dashboard cannot report
   this, because the dashboard is inside the thing that stopped.
 - **[fast lanes](docs/fast-lanes.md):** work that has to happen within minutes
   rather than at the next cron boundary.
 
-All three are optional. With nothing configured they're no-ops.
+The sweep and the reaper are on by default; the heartbeat and the lanes are
+no-ops with nothing configured.
 
 ## Requirements
 
@@ -201,6 +205,7 @@ classifier-gated prompts, which only interrupt on genuinely risky calls.
 - [Remote Control](docs/remote-control.md) — the three things called "remote control"
 - [Heartbeat](docs/heartbeat.md) — watching scheduled work from outside
 - [Fast lanes](docs/fast-lanes.md) — minute-latency work on the supervision tick
+- [Reaping](docs/reaping.md) — closing a job's window when it has stopped working
 
 ## Status
 

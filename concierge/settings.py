@@ -67,6 +67,29 @@ class WatchSpec:
 
 
 @dataclass(frozen=True)
+class Reaper:
+    """When a job that has stopped working may have its tmux window closed.
+
+    A finished job leaves an interactive REPL behind — `claude '<brief>'` does
+    not exit when its turn ends — holding ~350 MB. Four of them idled for up to
+    30 hours on 2026-08-29 and took the box to 1.0 GB free.
+
+    `finished_grace_minutes` is not zero because the concierge answers a
+    follow-up by typing into the job's own tmux window, so a window closed the
+    instant it reports is a follow-up that lands nowhere.
+
+    `waiting_*` are separate and much longer: a job with `status: waiting` is
+    blocked on a human, and reaping it on the finished timer silently loses the
+    question it asked.
+    """
+
+    finished_grace_minutes: int = 90
+    waiting_nudge_hours: float = 24.0
+    waiting_grace_hours: float = 6.0
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class RemoteControl:
     session: str = "rc"
     window: str = "0"
@@ -81,6 +104,7 @@ class Settings:
     watches: tuple[WatchSpec, ...] = ()
     tmux_session: str = "concierge"
     remote_control: RemoteControl = field(default_factory=RemoteControl)
+    reaper: Reaper = field(default_factory=Reaper)
     source: Path | None = None
     is_example: bool = True
 
@@ -174,6 +198,7 @@ def load(path: Path | None = None) -> Settings:
         raise ConfigError(f"{source} is not valid TOML: {exc}") from exc
 
     rc = raw.get("remote_control") or {}
+    reap = raw.get("reaper") or {}
     return Settings(
         repos=tuple(
             _parse_repo(row, i) for i, row in enumerate(raw.get("repos") or [])
@@ -192,6 +217,12 @@ def load(path: Path | None = None) -> Settings:
             # here means the tests can assert on it.
             name=rc.get("name") or socket.gethostname(),
             spawn_mode=rc.get("spawn_mode", "same-dir"),
+        ),
+        reaper=Reaper(
+            finished_grace_minutes=int(reap.get("finished_grace_minutes", 90)),
+            waiting_nudge_hours=float(reap.get("waiting_nudge_hours", 24)),
+            waiting_grace_hours=float(reap.get("waiting_grace_hours", 6)),
+            enabled=bool(reap.get("enabled", True)),
         ),
         source=source,
         is_example=is_example,

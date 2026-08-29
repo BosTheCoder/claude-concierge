@@ -130,13 +130,20 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
 
     monkeypatch.setattr(supervisor, "ensure_up", lambda: "healthy")
     monkeypatch.setattr(cli, "run_rc", lambda: "rc: all connected")
+    monkeypatch.setattr(cli, "run_reap", lambda: "nothing-to-reap")
     monkeypatch.setattr(cli, "run_heartbeat", lambda: "not-due")
     monkeypatch.setattr(cli, "run_lanes", lambda: "lanes ran")
 
     printed = []
     monkeypatch.setattr(cli.typer, "echo", printed.append)
     cli.ensure_up_cmd()
-    assert printed == ["healthy", "rc: all connected", "not-due", "lanes ran"]
+    assert printed == [
+        "healthy",
+        "rc: all connected",
+        "nothing-to-reap",
+        "not-due",
+        "lanes ran",
+    ]
 
 
 # --- the wiring from concierge.toml -----------------------------------------

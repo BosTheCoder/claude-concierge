@@ -5,3 +5,5 @@ rc.json
 rcserver.json
 *.rendered.md
 rcserver.log
+reaper.json
+reaper.log

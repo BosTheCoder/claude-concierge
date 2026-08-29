@@ -91,10 +91,19 @@ def allocate_id(jobs: dict[str, dict]) -> str:
     return random.choice(candidates)
 
 
-def upsert(job_id: str, path: Path | None = None, **fields) -> dict:
+def upsert(job_id: str, path: Path | None = None, *, touch: bool = True, **fields) -> dict:
+    """Merge `fields` into a row.
+
+    `touch=False` writes without moving `last_update`, for bookkeeping the job
+    itself did not do. It matters because `last_update` is the idleness clock
+    both reaper timers measure from: recording that a blocked job was nudged
+    would otherwise reset the very "waiting 31h with no reply" reading that
+    caused the nudge, and the row would then read as freshly active.
+    """
     jobs = load(path)
     job = jobs.setdefault(job_id, {})
     job.update(fields)
-    job["last_update"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if touch:
+        job["last_update"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     save(jobs, path)
     return job

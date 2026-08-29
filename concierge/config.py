@@ -16,6 +16,10 @@ LAST_CHAT_FILE = REPO / "state" / "last_chat"
 HEARTBEAT_FILE = REPO / "state" / "heartbeat.json"
 # Consecutive-strike counter for the Remote Control server (rcserver.py).
 RC_SERVER_FILE = REPO / "state" / "rcserver.json"
+# CPU samples the reaper compares between ticks (reaper.py).
+REAPER_FILE = REPO / "state" / "reaper.json"
+# What the reaper closed and what it spared, with the rule that decided it.
+REAPER_LOG = REPO / "state" / "reaper.log"
 # Copy of the Remote Control server's pane output. The server exits on its own
 # every few hours; tmux destroys a single-window session when its process dies,
 # so the window closes and takes the reason with it. This is the only place that
@@ -63,6 +67,19 @@ CONCIERGE_SETTINGS = json.dumps(
 )
 
 ACTIVE_STATUSES = frozenset({"running", "waiting"})
+
+# A job says it is finished by passing `--status done|failed` to `notify`. Both
+# mean the same thing to the reaper: the session has said its last word.
+FINISHED_STATUSES = frozenset({"done", "failed"})
+
+# Statuses that mean the row is already over — the window was killed by hand,
+# the machine restarted under it, or it was respawned as a new id. Nothing is
+# waiting on these and nothing will read them, so their window goes with no
+# grace period and no message.
+CLOSED_STATUSES = frozenset({"killed", "orphaned", "respawned", "reaped"})
+
+# How long a stopped job keeps its window (reaper.py).
+REAPER = SETTINGS.reaper
 
 # No I, L or O — they misread as 1 and 0 on a phone.
 ID_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ"
