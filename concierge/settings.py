@@ -67,6 +67,23 @@ class WatchSpec:
 
 
 @dataclass(frozen=True)
+class Telegram:
+    """Where each class of outbound traffic goes.
+
+    One Telegram DM used to carry everything: a job answering a question, a
+    job handing over a finished report, and the machine complaining about
+    itself. The third kind drowns the first two — Bosire's word for it was
+    "spam" — so ops traffic gets its own chat, the way a team keeps #alerts
+    out of its main channel.
+
+    Empty means "not set up yet", and every ops message falls back to the
+    conversation chat exactly as before. Nothing is ever dropped.
+    """
+
+    notifications_chat_id: str = ""
+
+
+@dataclass(frozen=True)
 class Reaper:
     """When a job that has stopped working may have its tmux window closed.
 
@@ -104,6 +121,7 @@ class Settings:
     watches: tuple[WatchSpec, ...] = ()
     tmux_session: str = "concierge"
     remote_control: RemoteControl = field(default_factory=RemoteControl)
+    telegram: Telegram = field(default_factory=Telegram)
     reaper: Reaper = field(default_factory=Reaper)
     source: Path | None = None
     is_example: bool = True
@@ -198,6 +216,7 @@ def load(path: Path | None = None) -> Settings:
         raise ConfigError(f"{source} is not valid TOML: {exc}") from exc
 
     rc = raw.get("remote_control") or {}
+    tg = raw.get("telegram") or {}
     reap = raw.get("reaper") or {}
     return Settings(
         repos=tuple(
@@ -217,6 +236,11 @@ def load(path: Path | None = None) -> Settings:
             # here means the tests can assert on it.
             name=rc.get("name") or socket.gethostname(),
             spawn_mode=rc.get("spawn_mode", "same-dir"),
+        ),
+        telegram=Telegram(
+            # str() rather than the raw value: TOML will hand back an int for
+            # a bare chat id, and every Telegram call path expects a string.
+            notifications_chat_id=str(tg.get("notifications_chat_id") or "").strip(),
         ),
         reaper=Reaper(
             finished_grace_minutes=int(reap.get("finished_grace_minutes", 90)),

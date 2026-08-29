@@ -206,6 +206,8 @@ classifier-gated prompts, which only interrupt on genuinely risky calls.
 - [Heartbeat](docs/heartbeat.md) — watching scheduled work from outside
 - [Fast lanes](docs/fast-lanes.md) — minute-latency work on the supervision tick
 - [Reaping](docs/reaping.md) — closing a job's window when it has stopped working
+- [Notifications](docs/notifications.md) — keeping the machine's own noise out of
+  the conversation
 
 ## Status
 

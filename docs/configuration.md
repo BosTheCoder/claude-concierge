@@ -138,6 +138,24 @@ switched off for a whole day *should* alert. That's a real gap.
 `expected` is quoted back to you in the alert, so write it as you'd want to read
 it at 7am.
 
+## `[telegram]`
+
+Optional. Where the machine's own noise goes, as opposed to the jobs' output.
+
+```toml
+[telegram]
+notifications_chat_id = "-1001234567890"
+```
+
+Unset — the default — every message goes to the conversation chat exactly as it
+did before. Set, heartbeat alerts and supervisor alerts move to that chat while
+jobs' own messages stay put. It is a routing change and never a filter; nothing
+is dropped either way.
+
+A group id is negative. Keep the minus sign. Full setup, including what counts
+as which class of traffic and how to re-point the Healthchecks alerts,
+is in [notifications.md](notifications.md).
+
 ## `[reaper]`
 
 Optional. When a job that has stopped working has its tmux window closed. See

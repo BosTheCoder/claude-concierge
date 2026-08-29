@@ -88,13 +88,29 @@ def alert_destination(state_path: Path | None = None) -> str | None:
     return registry.last_chat(state_path)
 
 
+def ops_destination(state_path: Path | None = None) -> str | None:
+    """Where the machine's own noise goes.
+
+    Everything routed through here is the machine talking about itself — it
+    failed to start, a watched job stopped running, a job was orphaned by a
+    restart. None of it is an answer to a question Bosire asked, and mixed into
+    the same DM as the jobs' actual output it buries the messages he wanted.
+    So it goes to a second chat when one is configured.
+
+    Unconfigured, this is exactly the old behaviour: the conversation chat. The
+    split is a routing change, never a filter — nothing is dropped for lack of
+    somewhere better to put it.
+    """
+    return config.NOTIFICATIONS_CHAT_ID or alert_destination(state_path)
+
+
 def _default_notifier(message: str, state_path: Path | None = None) -> None:
     """Best effort. A broken notify must never stop the supervisor."""
     # Always leave a trace: a hidden detached run with no destination at all
     # would otherwise swallow the one alert that matters most.
     print(message, file=sys.stderr)
 
-    chat_id = alert_destination(state_path)
+    chat_id = ops_destination(state_path)
     if not chat_id:
         return
     try:

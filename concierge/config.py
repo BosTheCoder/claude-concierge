@@ -78,7 +78,8 @@ FINISHED_STATUSES = frozenset({"done", "failed"})
 # grace period and no message.
 CLOSED_STATUSES = frozenset({"killed", "orphaned", "respawned", "reaped"})
 
-# How long a stopped job keeps its window (reaper.py).
+# Where ops traffic goes, and how long a stopped job keeps its window.
+NOTIFICATIONS_CHAT_ID = SETTINGS.telegram.notifications_chat_id
 REAPER = SETTINGS.reaper
 
 # No I, L or O — they misread as 1 and 0 on a phone.

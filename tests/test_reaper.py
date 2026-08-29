@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from concierge import reaper, registry
+from concierge import config, reaper, registry
 from concierge.settings import Reaper as ReaperSettings
 
 NOW = datetime(2026, 8, 29, 22, 0, tzinfo=timezone.utc)
@@ -392,3 +392,50 @@ def test_a_job_working_between_ticks_survives_the_sweep(tmp_path, monkeypatch):
         logger=lambda *a: None,
     )
     assert tmux.killed == []
+
+
+# --- the notification split --------------------------------------------------
+
+
+def test_ops_traffic_goes_to_the_notifications_chat_when_set(tmp_path, monkeypatch):
+    from concierge import supervisor
+
+    registry.save({"A3": job(chat_id="8183714282")}, tmp_path / "jobs.json")
+    monkeypatch.setattr(config, "NOTIFICATIONS_CHAT_ID", "-1009999")
+    assert supervisor.ops_destination(tmp_path / "jobs.json") == "-1009999"
+
+
+def test_ops_traffic_falls_back_to_the_conversation_when_unset(tmp_path, monkeypatch):
+    from concierge import supervisor
+
+    registry.save({"A3": job(chat_id="8183714282")}, tmp_path / "jobs.json")
+    monkeypatch.setattr(config, "NOTIFICATIONS_CHAT_ID", "")
+    assert supervisor.ops_destination(tmp_path / "jobs.json") == "8183714282"
+
+
+def test_the_nudge_does_not_reset_the_idle_clock(tmp_path):
+    """Caught live: the first real nudge moved `last_update` to now.
+
+    `last_update` is the clock both waiting timers measure from, so recording
+    the nudge on the row reset the "waiting 31h with no reply" reading that
+    caused it, and the job then read as freshly active.
+    """
+    state = tmp_path / "jobs.json"
+    waited_since = (NOW - timedelta(hours=29)).isoformat()
+    registry.save(
+        {"T7": job(id="T7", status="waiting", tmux_window="T7", last_update=waited_since)},
+        state,
+    )
+
+    reaper.run(
+        now=NOW,
+        registry_path=state,
+        cpu_path=tmp_path / "reaper.json",
+        tmux=FakeTmux({"T7": "claude"}),
+        nudger=lambda j, text: None,
+        logger=lambda *a: None,
+    )
+
+    row = registry.load(state)["T7"]
+    assert row["last_update"] == waited_since
+    assert row["nudged_at"]

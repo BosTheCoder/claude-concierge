@@ -104,6 +104,31 @@ spawn_mode = "same-dir"
 # expected = "daily at 04:00"  # quoted back to you in the alert
 
 
+# --- where each class of message goes ---------------------------------------
+#
+# One chat carrying everything is the default, and it is what you get by
+# leaving this out. It stops scaling the moment the machine starts talking
+# about itself: a job answering your question, a job handing over a finished
+# report, and "the nightly sync has not run in 30 hours" all land in the same
+# thread, and the third kind buries the first two.
+#
+# Set `notifications_chat_id` and the machine's own noise moves to a second
+# chat — heartbeat alerts, "concierge failed to start", "[A3] was mid-flight
+# when the machine restarted". Jobs' own messages never move; those are the
+# conversation.
+#
+# Nothing is ever dropped for the sake of quiet. Unset, every one of those
+# messages goes exactly where it goes today.
+#
+# To get the id: create a Telegram group, add your bot to it, send one message
+# in it, then read `chat.id` from
+#   https://api.telegram.org/bot<TOKEN>/getUpdates
+# A group id is negative — keep the minus sign.
+
+# [telegram]
+# notifications_chat_id = "-1001234567890"
+
+
 # --- closing finished jobs --------------------------------------------------
 #
 # `claude '<brief>'` does not exit when its turn ends; it drops to an
