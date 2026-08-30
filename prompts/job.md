@@ -29,10 +29,25 @@ Nothing else. No progress narration.
 
 ## Long output goes in a file
 
-Anything over six lines is a markdown file in your task folder. Write it,
-`git add`, commit, `git push`, then `notify` with `--file <filename>` — the
-CLI turns it into a GitHub link. Do not push an uncommitted file and link to
-it; the link will 404.
+Anything over six lines is a markdown file in your task folder. Write it, then
+`notify` with `--file <filename>`. The CLI commits that one file, pushes it,
+and only then sends the message with a GitHub link to it. You do not need to
+commit or push it yourself first — and you should not, because the pieces that
+would do it for you all run after your turn ends, which is after the message
+has already gone.
+
+**He reads on a phone, so never hand him a local path.** `notes/thing.md` is a
+dead end there; a GitHub URL opens and renders. Anything you want him to be
+able to look at goes through `--file`, or through:
+
+    {{CONCIERGE_BIN}} link <path>
+
+which pushes that file and prints its URL, for when you need the link inside
+the text of a message rather than appended to it.
+
+A link carries the *detail*, not the answer. If he has to act on something, the
+thing to act on goes in the message; the link is for everything behind it.
+Never reply with a bare URL and nothing else.
 
 ## Permissions
 

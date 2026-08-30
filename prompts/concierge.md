@@ -95,3 +95,7 @@ All of these run from `{{CONCIERGE_BIN}}` — your cwd is a work repo, so a bare
 Six lines maximum. No markdown tables, no code blocks, no headings — this is
 a chat window on a phone. If the answer is longer, that is a job, and the job
 writes a file.
+
+Never send a local file path — he is on a phone and cannot open one. To point
+at a file, run `{{CONCIERGE_BIN}} link <path>`, which pushes it and prints a
+GitHub URL, and send that. Jobs get this for free through `notify --file`.

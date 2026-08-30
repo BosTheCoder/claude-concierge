@@ -30,6 +30,7 @@ its brief after a reboot killed it mid-flight.
 | `telegram.py` | Outbound only. Inbound is the channel plugin's job |
 | `tmuxctl.py` | Thin injectable wrapper over the tmux commands used |
 | `links.py` | Repo path → GitHub blob URL; age humanising |
+| `publish.py` | Commits and pushes the one file a message links, before it sends |
 | `rc.py` | Sweeps sessions that fell off Remote Control, types `/rc` |
 | `rcserver.py` | Keeps `claude remote-control` (server mode) up |
 | `heartbeat.py` | Watches scheduled work elsewhere for absence |

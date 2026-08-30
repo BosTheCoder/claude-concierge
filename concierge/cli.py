@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from concierge import config, registry, spawn as spawn_mod, telegram, tmuxctl
+from concierge import config, publish, registry, spawn as spawn_mod, telegram, tmuxctl
 from concierge.links import github_link, humanize_age
 
 app = typer.Typer(add_completion=False, help="Claude messaging concierge")
@@ -56,15 +56,7 @@ def notify(
 
     body = text
     if file:
-        folder = job.get("task_folder")
-        try:
-            if not folder:
-                raise ValueError("no task folder recorded for this job")
-            body += "\n" + github_link(job["cwd"], folder, file)
-        except ValueError as exc:
-            # A link we cannot build must never cost the message itself.
-            path = f"{folder}/{file}" if folder else file
-            body += f"\n{path} (no GitHub link: {exc})"
+        body += "\n" + attach(job, file)
 
     telegram.send(
         job["chat_id"],
@@ -83,6 +75,35 @@ def notify(
         # A job that answers and goes back to work starts its wait afresh.
         fields["nudged_at"] = None
     registry.upsert(job_id, state_path, **fields)
+
+
+def attach(job: dict, file: str, publisher=None) -> str:
+    """The line that carries a file back to him: a GitHub link, or an honest path.
+
+    He reads on a phone. A local path is a dead end there, so the file is pushed
+    first and linked second — in that order, synchronously, because the `Stop`
+    hook that would otherwise commit it is async and fires after the turn, which
+    means it is always too late. See publish.py.
+
+    Every failure here falls back to the path with the reason attached. A
+    message that does not arrive is worse than a message with a path in it, so
+    nothing in this function may raise.
+    """
+    publisher = publisher or publish.publish
+    folder = job.get("task_folder") or ""
+    relpath = f"{folder}/{file}" if folder else file
+    cwd = job.get("cwd")
+
+    if not cwd:
+        return f"{relpath} (no GitHub link: no repo recorded for this job)"
+
+    try:
+        result = publisher(cwd, relpath)
+        if not result.ok:
+            return f"{relpath} (no GitHub link: {result.detail})"
+        return github_link(cwd, folder, file, branch=result.branch)
+    except Exception as exc:  # noqa: BLE001 - a broken link must not eat the message
+        return f"{relpath} (no GitHub link: {exc})"
 
 
 RESUME_PREFIX = (
@@ -152,6 +173,38 @@ def resolve_notify_args(
     if not text:
         raise typer.BadParameter("no message text given")
     return job_id, text
+
+
+@app.command("link")
+def link_cmd(
+    path: str = typer.Argument(..., help="A file, relative to your cwd or absolute"),
+):
+    """Push one file and print its GitHub URL.
+
+    The concierge answers short questions inline rather than spawning a job, so
+    it never goes through `notify` and would otherwise have no way to hand over
+    a file at all. Same guarantee as `notify --file`: the URL is printed only
+    once the content behind it is actually on the remote.
+    """
+    typer.echo(publish_and_link(path))
+
+
+def publish_and_link(path: str, cwd: Path | None = None, publisher=None) -> str:
+    """Resolve a path to its repo, push it, and return the URL — or say why not."""
+    publisher = publisher or publish.publish
+    target = Path(path).expanduser()
+    target = target if target.is_absolute() else (cwd or Path.cwd()) / target
+    target = target.resolve()
+
+    root = publish.repo_root(str(target.parent))
+    if not root:
+        raise typer.BadParameter(f"not inside a git repo: {path}")
+
+    relpath = str(target.relative_to(Path(root).resolve()))
+    result = publisher(root, relpath)
+    if not result.ok:
+        raise typer.BadParameter(f"cannot link {relpath}: {result.detail}")
+    return github_link(root, "", relpath, branch=result.branch)
 
 
 @app.command("respawn")

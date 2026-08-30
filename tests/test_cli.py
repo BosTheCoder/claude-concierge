@@ -86,6 +86,11 @@ def test_notify_remembers_the_chat_for_supervisor_alerts(tmp_path, monkeypatch):
     assert registry.last_chat(state) == "555"
 
 
+def published(ok=True, branch="main", detail=""):
+    """Stand in for the git side. What it did is publish.py's business."""
+    return lambda cwd, relpath: cli.publish.Published(ok, branch, detail)
+
+
 def test_notify_with_a_file_appends_the_github_link(tmp_path, monkeypatch):
     state = tmp_path / "jobs.json"
     registry.upsert(
@@ -93,6 +98,7 @@ def test_notify_with_a_file_appends_the_github_link(tmp_path, monkeypatch):
         cwd=str(cli.config.REPOS[0].path), task_folder="2026-08-05-thing",
     )
 
+    monkeypatch.setattr(cli.publish, "publish", published())
     sent = []
     monkeypatch.setattr(
         cli.telegram, "send",
@@ -107,6 +113,100 @@ def test_notify_with_a_file_appends_the_github_link(tmp_path, monkeypatch):
     )
 
 
+def test_the_file_is_pushed_before_the_message_is_sent(tmp_path, monkeypatch):
+    """The whole bug. He taps the link the instant it arrives, so the content
+    behind it has to be on GitHub already — the `Stop` hook that would commit
+    it is async and fires after the turn, which is far too late."""
+    state = tmp_path / "jobs.json"
+    registry.upsert(
+        "A3", state, id="A3", status="running", chat_id="9", title="t",
+        cwd=str(cli.config.REPOS[0].path), task_folder="2026-08-05-thing",
+    )
+
+    order = []
+    monkeypatch.setattr(
+        cli.publish, "publish",
+        lambda cwd, relpath: order.append("push")
+        or cli.publish.Published(True, "main", ""),
+    )
+    monkeypatch.setattr(
+        cli.telegram, "send", lambda *a, **k: order.append("send")
+    )
+
+    cli.notify("A3", "done", file="report.md", status=None, state_path=state)
+
+    assert order == ["push", "send"]
+
+
+def test_a_file_that_would_not_push_is_sent_as_a_path_not_a_dead_link(
+    tmp_path, monkeypatch
+):
+    """A 404 is worse than the path it replaced, so an unpushed file never gets
+    a URL — it gets the path and the reason."""
+    state = tmp_path / "jobs.json"
+    registry.upsert(
+        "A3", state, id="A3", status="running", chat_id="9", title="t",
+        cwd=str(cli.config.REPOS[0].path), task_folder="2026-08-05-thing",
+    )
+
+    monkeypatch.setattr(
+        cli.publish, "publish", published(ok=False, detail="push failed: offline")
+    )
+    sent = []
+    monkeypatch.setattr(
+        cli.telegram, "send", lambda chat_id, text, **kw: sent.append(text)
+    )
+
+    cli.notify("A3", "done", file="report.md", status=None, state_path=state)
+
+    assert "github.com" not in sent[0]
+    assert "2026-08-05-thing/report.md" in sent[0]
+    assert "push failed: offline" in sent[0]
+
+
+def test_the_link_points_at_the_branch_that_was_pushed(tmp_path, monkeypatch):
+    state = tmp_path / "jobs.json"
+    registry.upsert(
+        "A3", state, id="A3", status="running", chat_id="9", title="t",
+        cwd=str(cli.config.REPOS[0].path), task_folder="f",
+    )
+
+    monkeypatch.setattr(cli.publish, "publish", published(branch="side"))
+    sent = []
+    monkeypatch.setattr(
+        cli.telegram, "send", lambda chat_id, text, **kw: sent.append(text)
+    )
+
+    cli.notify("A3", "done", file="report.md", status=None, state_path=state)
+
+    assert "/blob/side/f/report.md" in sent[0]
+
+
+def test_the_message_still_goes_out_when_the_git_side_blows_up(
+    tmp_path, monkeypatch
+):
+    """Nothing about linking a file may cost him the message itself."""
+    state = tmp_path / "jobs.json"
+    registry.upsert(
+        "A3", state, id="A3", status="running", chat_id="9", title="t",
+        cwd=str(cli.config.REPOS[0].path), task_folder="f",
+    )
+
+    def explode(cwd, relpath):
+        raise OSError("git is on fire")
+
+    monkeypatch.setattr(cli.publish, "publish", explode)
+    sent = []
+    monkeypatch.setattr(
+        cli.telegram, "send", lambda chat_id, text, **kw: sent.append(text)
+    )
+
+    cli.notify("A3", "done", file="report.md", status=None, state_path=state)
+
+    assert sent[0].startswith("done\n")
+    assert "git is on fire" in sent[0]
+
+
 def test_notify_still_sends_when_the_repo_has_no_github_link(tmp_path, monkeypatch):
     state = tmp_path / "jobs.json"
     registry.upsert(
@@ -114,6 +214,9 @@ def test_notify_still_sends_when_the_repo_has_no_github_link(tmp_path, monkeypat
         cwd="/somewhere/else", task_folder="2026-08-05-thing",
     )
 
+    monkeypatch.setattr(
+        cli.publish, "publish", published(ok=False, detail="no such file")
+    )
     sent = []
     monkeypatch.setattr(
         cli.telegram, "send",
@@ -134,6 +237,7 @@ def test_notify_with_a_file_but_no_task_folder_never_links_to_none(
         cwd=str(cli.config.REPOS[0].path), task_folder=None,
     )
 
+    monkeypatch.setattr(cli.publish, "publish", published())
     sent = []
     monkeypatch.setattr(
         cli.telegram, "send",
