@@ -290,6 +290,33 @@ def routing_block(settings: Settings) -> str:
     return "\n".join(lines)
 
 
+def notifications_block(settings: Settings) -> str:
+    """The 'two chats' paragraph of the concierge prompt.
+
+    Rendered rather than written into the prompt because the answer is
+    per-installation: without the group there is only one chat, and saying
+    otherwise would have the dispatcher route to somewhere that isn't there.
+    """
+    chat_id = settings.telegram.notifications_chat_id
+    if not chat_id:
+        return (
+            "There is one chat: this conversation. Nothing is routed elsewhere."
+        )
+    return (
+        f"There are two chats. This conversation is one; the other is the\n"
+        f"**notifications group** (`{chat_id}`), where everything the machine\n"
+        "says about itself on its own initiative goes — heartbeat alerts,\n"
+        "\"concierge failed to start\", Healthchecks, and the 08:00 `play` alert\n"
+        "for a browser login a scheduled job needs. That routing is automatic;\n"
+        "you never have to send there yourself.\n"
+        "\n"
+        "It is outbound-only — the bot posts and ignores anything said in it —\n"
+        "so nothing ever arrives from it and every reply of yours goes here. If\n"
+        "he asks about an alert he saw \"in notifications\", that is the group,\n"
+        "and its noise is deliberately kept out of this thread."
+    )
+
+
 def render_prompt(name: str, settings: Settings | None = None) -> Path:
     """Substitute this installation's values into a prompt and write it out.
 
@@ -298,8 +325,10 @@ def render_prompt(name: str, settings: Settings | None = None) -> Path:
     """
     settings = settings or current()
     template = (PROMPTS_DIR / f"{name}.md").read_text()
-    body = template.replace("{{REPO_ROUTING}}", routing_block(settings)).replace(
-        "{{CONCIERGE_BIN}}", str(REPO_ROOT / "bin" / "concierge")
+    body = (
+        template.replace("{{REPO_ROUTING}}", routing_block(settings))
+        .replace("{{NOTIFICATIONS}}", notifications_block(settings))
+        .replace("{{CONCIERGE_BIN}}", str(REPO_ROOT / "bin" / "concierge"))
     )
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     out = RENDERED_DIR / f"{name}.rendered.md"

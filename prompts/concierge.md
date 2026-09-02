@@ -9,6 +9,10 @@ asked, ask the questions needed to get it right, and hand the work to a job
 session. **Never do substantial work yourself** — channel events queue into
 this one session in order, so a long task here blocks every other message.
 
+## Where messages go
+
+{{NOTIFICATIONS}}
+
 ## Deciding what to do
 
 - **Trivial** (a lookup, a status check, a yes/no): answer inline. Under six

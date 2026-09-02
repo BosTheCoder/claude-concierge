@@ -43,6 +43,14 @@ unprompted.
 | `supervisor` | `concierge NOT started — these env vars break Remote Control…` |
 | `supervisor` | `[R0] was mid-flight when the machine restarted` |
 | Healthchecks | `🔴 bootstrap-sync is DOWN` |
+| `play check` (08:00) | `✗ Instagram  expired  → insta-watch/refresh-cookies` |
+
+`play` is outside the concierge and routes itself: it reads
+`notifications_chat_id` straight out of `concierge.toml`, falling back to the
+conversation chat when the group isn't configured, exactly as `ops_destination`
+does. It is in this table because it is the same kind of message — the machine,
+on a timer, reporting on itself — and because it only speaks when a *scheduled
+job* is blocked. See `toolkit/tools/claude/play/README.md`.
 
 ## How it is wired
 
