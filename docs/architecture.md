@@ -35,6 +35,9 @@ its brief after a reboot killed it mid-flight.
 | `rcserver.py` | Keeps `claude remote-control` (server mode) up |
 | `heartbeat.py` | Watches scheduled work elsewhere for absence |
 | `lanes.py` | Runs minute-latency external commands on the tick |
+| `reaper.py` | Closes a stopped job's window, on rules that never touch a live one |
+| `sessions.py` | Every Claude process on the box, and whether it is still working |
+| `dashboard.py` | Serves that as a page, and keeps itself and its tailnet proxy up |
 
 `prompts/concierge.md` and `prompts/job.md` are the two system prompts. They're
 templates: `{{REPO_ROUTING}}` and `{{CONCIERGE_BIN}}` are substituted from

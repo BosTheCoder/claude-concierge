@@ -66,6 +66,14 @@ CONCIERGE_SETTINGS = json.dumps(
     {"enabledPlugins": {TELEGRAM_PLUGIN: True}}, separators=(",", ":")
 )
 
+# --- the session dashboard (dashboard.py) -----------------------------------
+# The page that lists every Claude process on the box. It lives in its own tmux
+# window in the concierge session, started by ensure-up, because the case it is
+# for is "no terminal is open". Published on the tailnet by a Docker-side
+# proxy — see dashboard.expose for why that hop is necessary.
+DASHBOARD_WINDOW = "dash"
+DASHBOARD_PORT = int(os.environ.get("CONCIERGE_DASHBOARD_PORT", "8787"))
+
 ACTIVE_STATUSES = frozenset({"running", "waiting"})
 
 # A job says it is finished by passing `--status done|failed` to `notify`. Both

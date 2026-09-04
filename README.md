@@ -82,9 +82,14 @@ in one cannot stop the concierge from starting:
   this, because the dashboard is inside the thing that stopped.
 - **[fast lanes](docs/fast-lanes.md):** work that has to happen within minutes
   rather than at the next cron boundary.
+- **[dashboard](docs/dashboard.md):** the reaper only knows about jobs. This is
+  a page listing *every* Claude process on the machine — hand-started sessions
+  included — with what state each is in and a button to close the idle ones.
+  Reachable from a phone; the concierge's own session can never be closed
+  from it.
 
-The sweep and the reaper are on by default; the heartbeat and the lanes are
-no-ops with nothing configured.
+The sweep, the reaper and the dashboard are on by default; the heartbeat and
+the lanes are no-ops with nothing configured.
 
 ## Requirements
 
@@ -206,6 +211,8 @@ classifier-gated prompts, which only interrupt on genuinely risky calls.
 - [Heartbeat](docs/heartbeat.md) — watching scheduled work from outside
 - [Fast lanes](docs/fast-lanes.md) — minute-latency work on the supervision tick
 - [Reaping](docs/reaping.md) — closing a job's window when it has stopped working
+- [Dashboard](docs/dashboard.md) — every Claude process on the box, and how it
+  decides whether one is still working
 - [Links](docs/links.md) — why every file arrives as a GitHub URL, and the
   ordering that keeps it from 404ing
 - [Notifications](docs/notifications.md) — keeping the machine's own noise out of

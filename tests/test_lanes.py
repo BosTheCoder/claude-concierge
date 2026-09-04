@@ -133,6 +133,7 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
     monkeypatch.setattr(cli, "run_reap", lambda: "nothing-to-reap")
     monkeypatch.setattr(cli, "run_heartbeat", lambda: "not-due")
     monkeypatch.setattr(cli, "run_lanes", lambda: "lanes ran")
+    monkeypatch.setattr(cli, "run_dashboard", lambda: "dash: healthy")
 
     printed = []
     monkeypatch.setattr(cli.typer, "echo", printed.append)
@@ -143,6 +144,7 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
         "nothing-to-reap",
         "not-due",
         "lanes ran",
+        "dash: healthy",
     ]
 
 

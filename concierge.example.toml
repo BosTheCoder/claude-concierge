@@ -143,7 +143,7 @@ spawn_mode = "same-dir"
 # # How long a job that reported done/failed keeps its window. Not zero: a
 # # follow-up message is typed into the job's own tmux window, so a window
 # # closed the instant it reports is a follow-up that lands nowhere.
-# finished_grace_minutes = 90
+# finished_grace_minutes = 15
 #
 # # A job with status `waiting` is blocked on you, not finished. It is never
 # # reaped on the timer above. After this long with no reply it re-sends its

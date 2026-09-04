@@ -263,6 +263,7 @@ def ensure_up_cmd():
     typer.echo(run_reap())
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
+    typer.echo(run_dashboard())
 
 
 @app.command("heartbeat")
@@ -329,6 +330,24 @@ def rc_server_cmd():
     typer.echo(rcserver.ensure_up())
 
 
+@app.command("dash")
+def dash_cmd(
+    port: int = typer.Option(config.DASHBOARD_PORT, help="Port to listen on"),
+    expose: bool = typer.Option(
+        True, help="Also publish it on the tailnet so the phone can reach it"
+    ),
+):
+    """Serve the session dashboard — every Claude process on the box, what
+    state it is in, and a button to close the idle ones.
+
+    Normally started by `ensure-up` into its own tmux window, so it is there
+    when no terminal is. This is the handle for running it in the foreground.
+    """
+    from concierge import dashboard
+
+    dashboard.serve(port=port, exposed=expose, echo=typer.echo)
+
+
 @app.command("sessions")
 def sessions_cmd():
     """Which Claude Code sessions are on Remote Control, and which have fallen
@@ -336,6 +355,20 @@ def sessions_cmd():
     from concierge import rc
 
     typer.echo(rc.report())
+
+
+def run_dashboard() -> str:
+    """The dashboard rides ensure-up for exactly the reason it exists: it is
+    only useful when he has no terminal open, which is precisely when nobody is
+    there to start it. Same total guard as the heartbeat and the lanes — a
+    broken dashboard must never stop the concierge coming up.
+    """
+    try:
+        from concierge import dashboard
+
+        return dashboard.ensure_up()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"dash-error: {exc}"
 
 
 def run_rc() -> str:

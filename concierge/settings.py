@@ -100,7 +100,7 @@ class Reaper:
     question it asked.
     """
 
-    finished_grace_minutes: int = 90
+    finished_grace_minutes: int = 15
     waiting_nudge_hours: float = 24.0
     waiting_grace_hours: float = 6.0
     enabled: bool = True
@@ -243,7 +243,7 @@ def load(path: Path | None = None) -> Settings:
             notifications_chat_id=str(tg.get("notifications_chat_id") or "").strip(),
         ),
         reaper=Reaper(
-            finished_grace_minutes=int(reap.get("finished_grace_minutes", 90)),
+            finished_grace_minutes=int(reap.get("finished_grace_minutes", 15)),
             waiting_nudge_hours=float(reap.get("waiting_nudge_hours", 24)),
             waiting_grace_hours=float(reap.get("waiting_grace_hours", 6)),
             enabled=bool(reap.get("enabled", True)),

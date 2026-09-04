@@ -103,7 +103,9 @@ def test_finished_idle_job_with_output_is_reaped(wrote_output):
 
 
 def test_still_inside_the_grace_period_is_spared(wrote_output):
-    fresh = job(last_update=(NOW - timedelta(minutes=20)).isoformat())
+    # Comfortably inside the shipped default, which is 15 minutes and has been
+    # shortened before — a fixture pinned just under it breaks on the next cut.
+    fresh = job(last_update=(NOW - timedelta(minutes=2)).isoformat())
     assert call(fresh).action == "spare"
 
 

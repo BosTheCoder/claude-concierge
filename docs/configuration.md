@@ -164,7 +164,7 @@ Optional. When a job that has stopped working has its tmux window closed. See
 ```toml
 [reaper]
 enabled = true
-finished_grace_minutes = 90
+finished_grace_minutes = 15
 waiting_nudge_hours = 24
 waiting_grace_hours = 6
 ```

@@ -55,14 +55,17 @@ A follow-up from Telegram reaches a running job by being typed into its own tmux
 window (`tmux send-keys -t concierge:A3`). Close the window the instant a job
 reports and that follow-up lands nowhere.
 
-90 minutes is the default. Long enough to cover reading a message on a phone,
-thinking, and replying in one sitting, which is how follow-ups actually happen;
-short enough that an evening job does not hold 800 MB all night. The four that
-prompted this had 30 hours and got no follow-up at all.
+15 minutes is the default. It was 90 until 2026-09-04, and the reason it came
+down is that the trade is not symmetric. Memory is the binding constraint on a
+14 GB WSL VM — a handful of finished REPLs takes the box under 1 GB free — while
+the cost of closing one early is one command: the registry keeps the brief and
+the task folder, so `respawn <id>` starts the work again from what was written
+down.
 
-The cost of closing one slightly early is small and known: the registry keeps
-the brief and the task folder, so `respawn <id>` starts the work again from what
-was written down. That asymmetry is what justifies hours rather than days.
+What 15 minutes gives up is the leisurely follow-up. Reply within the quarter
+hour and the message still lands in the job's own window; reply an hour later
+and it lands nowhere, and you respawn instead. Bosire took that trade
+explicitly. Lengthen it if you follow up more often than you run out of RAM.
 
 ### Why `waiting` is separate
 
@@ -120,7 +123,7 @@ Each spares the job and writes the reason to `state/reaper.log`.
 ```toml
 [reaper]
 enabled = true
-finished_grace_minutes = 90
+finished_grace_minutes = 15
 waiting_nudge_hours = 24
 waiting_grace_hours = 6
 ```

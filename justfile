@@ -13,3 +13,7 @@ jobs:
 # The Remote Control server — this machine in the Claude app's device list.
 rc-server:
     uv run python -m concierge.cli rc-server
+
+# The session dashboard — every Claude process on the box, in a page.
+dash:
+    uv run python -m concierge.cli dash
