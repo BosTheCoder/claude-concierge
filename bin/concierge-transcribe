@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# concierge-transcribe <audio-file> — print a transcript of a Telegram voice note.
+#
+# Telegram delivers voice messages as opus .oga with no transcript. There is no
+# local whisper on this box, so this converts to mp3 and sends it to Gemini via
+# OpenRouter, which accepts audio inline. Prints the transcript on stdout.
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: concierge-transcribe <audio-file>" >&2
+  exit 2
+fi
+
+AUDIO="$1"
+[[ -r "$AUDIO" ]] || { echo "concierge-transcribe: cannot read $AUDIO" >&2; exit 1; }
+
+# shellcheck disable=SC1091
+source "$HOME/.claude/lib/load-secrets.sh"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+ffmpeg -y -loglevel error -i "$AUDIO" -ar 16000 -ac 1 -b:a 64k "$TMP/voice.mp3"
+
+python3 - "$TMP/voice.mp3" <<'PY'
+import base64, json, os, sys, urllib.error, urllib.request
+
+audio = base64.b64encode(open(sys.argv[1], "rb").read()).decode()
+body = {
+    "model": "google/gemini-2.5-flash",
+    "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "Transcribe this voice note verbatim. Output only the transcript text, nothing else."},
+        {"type": "input_audio", "input_audio": {"data": audio, "format": "mp3"}},
+    ]}],
+}
+req = urllib.request.Request(
+    "https://openrouter.ai/api/v1/chat/completions",
+    data=json.dumps(body).encode(),
+    headers={
+        "Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
+        "Content-Type": "application/json",
+    },
+)
+try:
+    resp = json.load(urllib.request.urlopen(req, timeout=180))
+except urllib.error.HTTPError as exc:
+    sys.exit(f"concierge-transcribe: OpenRouter {exc.code}: {exc.read().decode()[:500]}")
+print(resp["choices"][0]["message"]["content"].strip())
+PY
