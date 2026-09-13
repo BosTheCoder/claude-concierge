@@ -360,17 +360,21 @@ class FakeClaudePane:
     that many lone Enters as well, for the retry.
     """
 
-    def __init__(self, box="", swallow=0):
+    def __init__(self, box="", swallow=0, starting=0):
         self.box, self.swallow, self.buffer, self.submitted = box, swallow, "", []
+        # Captures that show no input box yet; keys typed meanwhile are lost.
+        self.starting = starting
 
     def __call__(self, argv):
         import subprocess
 
         out = ""
-        if argv[1] == "set-buffer":
+        if argv[1] == "capture-pane" and self.starting:
+            self.starting -= 1
+        elif argv[1] == "set-buffer":
             self.buffer = argv[-1]
         elif argv[1] == "paste-buffer":
-            self.box += self.buffer
+            self.box += "" if self.starting else self.buffer
         elif argv[1] == "send-keys":
             keys = [k for k in argv[4:] if k != "-l"]
             if keys != ["Enter"]:
@@ -403,6 +407,15 @@ def test_send_submits_a_long_message_even_when_an_enter_is_dropped(tmp_path):
 
     assert pane.submitted == [LONG]
     assert pane.box == ""
+
+
+def test_send_waits_for_a_job_that_is_still_starting(tmp_path):
+    pane = FakeClaudePane(starting=3)
+
+    cli.send("E6", LONG, state_path=_job(tmp_path), runner=pane,
+             sleeper=lambda s: None)
+
+    assert pane.submitted == [LONG]
 
 
 def test_send_fails_loudly_when_the_message_never_leaves_the_box(tmp_path):

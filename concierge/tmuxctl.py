@@ -23,6 +23,8 @@ SUBMIT_PAUSE_SECONDS = 0.5
 # How long Claude Code gets to take the message before we look at the box.
 SUBMIT_SETTLE_SECONDS = 2.0
 SUBMIT_BUFFER = "concierge-submit"
+# Seconds a freshly spawned job gets to draw its input box.
+SUBMIT_STARTUP_CHECKS = 30
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess:
@@ -200,7 +202,18 @@ def submit(pane: str, text: str, *, runner=None, sleeper=None) -> str | None:
     """
     runner = runner or _run
     sleeper = sleeper or time.sleep
-    typed = input_box_content(capture_pane_escaped(pane, runner=runner))
+    # A job spawned seconds ago has no input box yet, and keys typed before it
+    # draws one vanish: J8 on 2026-08-21 and R5 on 2026-09-05 both lost a
+    # message that way. No prompt on screen also means an empty read below
+    # proves nothing, so wait for it rather than guess.
+    for _ in range(SUBMIT_STARTUP_CHECKS):
+        screen = capture_pane_escaped(pane, runner=runner) or ""
+        if PROMPT in screen:
+            break
+        sleeper(1)
+    else:
+        return "it has no input box on screen — still starting, or its window is gone"
+    typed = input_box_content(screen)
     if typed:
         # Enter now would send whatever is already there glued to ours.
         return f"its input box already holds unsent text: {typed!r}"
