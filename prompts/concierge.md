@@ -105,8 +105,13 @@ see which message a reply was attached to.
 - For anything conversational, point them at the job's Remote Control link
   instead. That is the unambiguous path.
 
-To pass a message to a running job, send keys to its tmux window:
-`tmux send-keys -t concierge:A3 '<message>' Enter`
+To pass a message to a running job:
+`{{CONCIERGE_BIN}} send A3 '<message>'`
+
+Never raw `tmux send-keys` for this: a long message and its `Enter` in one
+call sits unsent in the job's input box. `send` presses Enter separately and
+checks the box emptied. If it exits non-zero the message did not arrive — tell
+him so, with the reason it printed, instead of saying it was routed.
 
 ## Commands
 

@@ -346,3 +346,79 @@ def test_format_status_reports_a_done_job_rather_than_treating_it_as_missing():
     out = cli.format_status(job, now)
     assert "[Z9] old job — done ·" in out
     assert "https://claude.ai/code/session_old" in out
+
+
+# --- send --------------------------------------------------------------------
+
+
+class FakeClaudePane:
+    """A job's pane, as far as typing into it goes.
+
+    Text sits in the input box until an Enter arrives in a call of its own. An
+    Enter in the same `send-keys` call as the text is swallowed into it, which
+    is what left E6's message unsent on 2026-09-13. `swallow` makes Claude drop
+    that many lone Enters as well, for the retry.
+    """
+
+    def __init__(self, box="", swallow=0):
+        self.box, self.swallow, self.buffer, self.submitted = box, swallow, "", []
+
+    def __call__(self, argv):
+        import subprocess
+
+        out = ""
+        if argv[1] == "set-buffer":
+            self.buffer = argv[-1]
+        elif argv[1] == "paste-buffer":
+            self.box += self.buffer
+        elif argv[1] == "send-keys":
+            keys = [k for k in argv[4:] if k != "-l"]
+            if keys != ["Enter"]:
+                self.box += "".join(k for k in keys if k != "Enter")
+            elif self.swallow:
+                self.swallow -= 1
+            elif self.box:
+                self.submitted.append(self.box)
+                self.box = ""
+        elif argv[1] == "capture-pane":
+            out = f"❯\xa0{self.box}\n" if self.box else "❯\xa0\x1b[2mold\x1b[0m\n"
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+LONG = "Thursday is quote day, fix the respond loop. " * 12
+
+
+def _job(tmp_path):
+    state = tmp_path / "jobs.json"
+    registry.upsert("E6", state, id="E6", status="waiting", chat_id="9",
+                    title="t", tmux_window="E6")
+    return state
+
+
+def test_send_submits_a_long_message_even_when_an_enter_is_dropped(tmp_path):
+    pane = FakeClaudePane(swallow=1)
+
+    cli.send("E6", LONG, state_path=_job(tmp_path), runner=pane,
+             sleeper=lambda s: None)
+
+    assert pane.submitted == [LONG]
+    assert pane.box == ""
+
+
+def test_send_fails_loudly_when_the_message_never_leaves_the_box(tmp_path):
+    pane = FakeClaudePane(swallow=99)
+
+    with pytest.raises(RuntimeError, match="not delivered"):
+        cli.send("E6", LONG, state_path=_job(tmp_path), runner=pane,
+                 sleeper=lambda s: None)
+    assert pane.submitted == []
+
+
+def test_send_will_not_press_enter_on_text_already_in_the_box(tmp_path):
+    pane = FakeClaudePane(box="half-typed reply")
+
+    with pytest.raises(RuntimeError, match="half-typed reply"):
+        cli.send("E6", LONG, state_path=_job(tmp_path), runner=pane,
+                 sleeper=lambda s: None)
+    assert pane.submitted == []
+    assert pane.box == "half-typed reply"

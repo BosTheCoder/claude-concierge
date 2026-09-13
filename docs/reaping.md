@@ -52,7 +52,7 @@ Keyed on the registry `status`, which the job itself sets by passing
 ### Why the grace period is not zero
 
 A follow-up from Telegram reaches a running job by being typed into its own tmux
-window (`tmux send-keys -t concierge:A3`). Close the window the instant a job
+window (`concierge send A3`). Close the window the instant a job
 reports and that follow-up lands nowhere.
 
 15 minutes is the default. It was 90 until 2026-09-04, and the reason it came

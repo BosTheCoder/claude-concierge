@@ -5,8 +5,24 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+import time
 
 RC_URL = re.compile(r"https://claude\.ai/code/\S+")
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# Claude Code's own prompt marker. Queued messages are drawn with it too, so
+# the input box is the last one on screen.
+PROMPT = "❯"
+
+# Text and its Enter must reach Claude Code as separate reads. Measured
+# 2026-09-13 on Claude Code 2.1.270: `send-keys '<long text>' Enter` in one call
+# is taken as a paste, the Enter becomes part of it, and the message sits in the
+# input box unsent. A short message in the same call goes through, which is why
+# it looked intermittent. Job E6 waited six hours on one.
+SUBMIT_PAUSE_SECONDS = 0.5
+# How long Claude Code gets to take the message before we look at the box.
+SUBMIT_SETTLE_SECONDS = 2.0
+SUBMIT_BUFFER = "concierge-submit"
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess:
@@ -151,3 +167,55 @@ def send_keys(pane: str, *keys: str, runner=None) -> bool:
     """
     runner = runner or _run
     return runner(["tmux", "send-keys", "-t", pane, *keys]).returncode == 0
+
+
+def input_box_content(pane_text: str) -> str | None:
+    """What the user has actually typed and not yet sent, or None.
+
+    Claude Code renders the last submitted input back into the empty box as a
+    dim SGR-2 placeholder, so the plain text of the pane cannot tell "nothing
+    pending" from "an instruction waiting to be sent". Stripping the dim run
+    first is what makes the difference visible. Needs a `capture-pane -e`.
+    """
+    lines = [line for line in (pane_text or "").splitlines() if PROMPT in line]
+    if not lines:
+        return None
+    after = lines[-1].split(PROMPT, 1)[1]
+    # A dim run is the ghost of the last message, drawn only when the box is
+    # empty. Anything left after removing it is really there.
+    without_ghost = re.sub(r"\x1b\[2m.*?(?:\x1b\[0m|$)", "", after)
+    # The marker is followed by U+00A0, which str.strip() does not touch.
+    text = ANSI.sub("", without_ghost).replace("\xa0", " ").strip()
+    return text or None
+
+
+def submit(pane: str, text: str, *, runner=None, sleeper=None) -> str | None:
+    """Type `text` into a Claude Code pane and send it. None once it has gone,
+    otherwise why it has not.
+
+    Pasted (`paste-buffer -p`) so newlines stay newlines inside the message,
+    then Enter on its own after a pause — see SUBMIT_PAUSE_SECONDS. Gone means
+    the input box is empty afterwards; a busy session queues the message and
+    clears the box just the same.
+    """
+    runner = runner or _run
+    sleeper = sleeper or time.sleep
+    typed = input_box_content(capture_pane_escaped(pane, runner=runner))
+    if typed:
+        # Enter now would send whatever is already there glued to ours.
+        return f"its input box already holds unsent text: {typed!r}"
+    if (
+        runner(["tmux", "set-buffer", "-b", SUBMIT_BUFFER, "--", text]).returncode
+        or runner(
+            ["tmux", "paste-buffer", "-p", "-d", "-b", SUBMIT_BUFFER, "-t", pane]
+        ).returncode
+    ):
+        return "tmux could not type into it — is its window still open?"
+    sleeper(SUBMIT_PAUSE_SECONDS)
+    for _ in range(2):
+        runner(["tmux", "send-keys", "-t", pane, "Enter"])
+        sleeper(SUBMIT_SETTLE_SECONDS)
+        left = input_box_content(capture_pane_escaped(pane, runner=runner))
+        if not left:
+            return None
+    return f"still sitting in its input box after two Enters: {left!r}"

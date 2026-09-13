@@ -156,9 +156,9 @@ class FakeTmux:
     def capture_pane_escaped(self, pane, **kw):
         return self.panes.get(pane, EMPTY_BOX)
 
-    def send_keys(self, pane, *keys, **kw):
-        self.sent.append((pane, keys))
-        return True
+    def submit(self, pane, text, **kw):
+        self.sent.append((pane, text))
+        return None
 
 
 def run_sweep(tmp_path, tmux, *, pids, reconnect_on_wait=(), now=NOW, **kw):
@@ -194,7 +194,7 @@ def test_sweep_reconnects_a_dead_pane_and_says_nothing(tmp_path):
         tmp_path, tmux, pids=(100,), reconnect_on_wait=(100,)
     )
 
-    assert tmux.sent == [("%100", ("/rc", "Enter"))]
+    assert tmux.sent == [("%100", "/rc")]
     assert "reconnected" in summary
     assert notes == []
 
@@ -233,7 +233,7 @@ def test_a_subagent_on_a_genuinely_dead_pane_is_still_not_typed_into_twice(tmp_p
 
     run_sweep(tmp_path, tmux, pids=(100, 200), reconnect_on_wait=(100,))
 
-    assert tmux.sent == [("%0", ("/rc", "Enter"))]
+    assert tmux.sent == [("%0", "/rc")]
 
 
 def test_sweep_reconnects_an_adhoc_window_outside_the_concierge_session(tmp_path):
@@ -244,7 +244,7 @@ def test_sweep_reconnects_an_adhoc_window_outside_the_concierge_session(tmp_path
         tmp_path, tmux, pids=(100,), reconnect_on_wait=(100,)
     )
 
-    assert tmux.sent == [("%9", ("/rc", "Enter"))]
+    assert tmux.sent == [("%9", "/rc")]
     assert "reconnected" in summary
     assert notes == []
 
@@ -289,7 +289,7 @@ def test_sweep_reports_when_rc_does_not_bring_the_bridge_back(tmp_path):
 
     summary, notes = run_sweep(tmp_path, tmux, pids=(100,))
 
-    assert tmux.sent == [("%100", ("/rc", "Enter"))]
+    assert tmux.sent == [("%100", "/rc")]
     assert "still down" in summary
     assert "needs restarting" in notes[0]
 

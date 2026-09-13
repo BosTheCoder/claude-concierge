@@ -41,13 +41,13 @@ and each one shapes the code below:
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from concierge import config, tmuxctl
+from concierge.tmuxctl import input_box_content
 
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"
 
@@ -64,11 +64,6 @@ MIN_AGE_SECONDS = 120
 # Reconnects are silent; only the cases needing a human speak, and then not
 # more than once an hour each.
 ALERT_COOLDOWN_MINUTES = 60
-
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
-# Claude Code's own prompt marker. Queued messages are drawn with it too, so
-# the input box is the last one on screen.
-PROMPT = "❯"
 
 
 @dataclass(frozen=True)
@@ -198,27 +193,6 @@ def is_running(session: Session, proc_start=read_proc_start) -> bool:
     if actual is None:
         return False
     return session.proc_start is None or actual == session.proc_start
-
-
-def input_box_content(pane_text: str) -> str | None:
-    """What the user has actually typed and not yet sent, or None.
-
-    The whole safety of this module rests here. Claude Code renders the last
-    submitted input back into the empty box as a dim SGR-2 placeholder, so the
-    plain text of the pane cannot tell "nothing pending" from "an instruction
-    waiting to be sent". Stripping the dim run first is what makes the
-    difference visible.
-    """
-    lines = [line for line in (pane_text or "").splitlines() if PROMPT in line]
-    if not lines:
-        return None
-    after = lines[-1].split(PROMPT, 1)[1]
-    # A dim run is the ghost of the last message, drawn only when the box is
-    # empty. Anything left after removing it is really there.
-    without_ghost = re.sub(r"\x1b\[2m.*?(?:\x1b\[0m|$)", "", after)
-    # The marker is followed by U+00A0, which str.strip() does not touch.
-    text = ANSI.sub("", without_ghost).replace("\xa0", " ").strip()
-    return text or None
 
 
 # --- alert cooldown ---------------------------------------------------------
@@ -402,8 +376,9 @@ def sweep(
             outcomes.append(f"{session.name}: has unsent text")
             continue
 
-        if not tmux.send_keys(session.pane, "/rc", "Enter"):
-            alert(key, f"{session.name}: couldn't send /rc to its pane.")
+        problem = tmux.submit(session.pane, "/rc")
+        if problem:
+            alert(key, f"{session.name}: couldn't send /rc to its pane: {problem}")
             outcomes.append(f"{session.name}: send failed")
             continue
         pending.append(session)

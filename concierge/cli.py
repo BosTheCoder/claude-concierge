@@ -106,6 +106,28 @@ def attach(job: dict, file: str, publisher=None) -> str:
         return f"{relpath} (no GitHub link: {exc})"
 
 
+def send(
+    job_id: str,
+    text: str,
+    *,
+    state_path: Path | None = None,
+    runner=None,
+    sleeper=None,
+) -> None:
+    """Pass a message to a running job, and raise unless it was submitted.
+
+    Never `tmux send-keys '<text>' Enter`: that leaves a long message sitting
+    unsent in the job's input box. See tmuxctl.submit.
+    """
+    jobs = registry.load(state_path)
+    if job_id not in jobs:
+        raise KeyError(f"unknown job: {job_id}")
+    pane = f"{config.TMUX_SESSION}:{jobs[job_id].get('tmux_window') or job_id}"
+    problem = tmuxctl.submit(pane, text, runner=runner, sleeper=sleeper)
+    if problem:
+        raise RuntimeError(f"[{job_id}] not delivered: {problem}")
+
+
 RESUME_PREFIX = (
     "You are resuming an interrupted job. Its task folder has notes.md and "
     "index.md — read them first.\n\n"
@@ -205,6 +227,17 @@ def publish_and_link(path: str, cwd: Path | None = None, publisher=None) -> str:
     if not result.ok:
         raise typer.BadParameter(f"cannot link {relpath}: {result.detail}")
     return github_link(root, "", relpath, branch=result.branch)
+
+
+@app.command("send")
+def send_cmd(job_id: str, message: str):
+    """Pass a message to a running job and confirm it was submitted."""
+    try:
+        send(job_id, message)
+    except (KeyError, RuntimeError) as exc:
+        typer.echo(exc.args[0], err=True)
+        raise typer.Exit(1)
+    typer.echo(f"[{job_id}] sent")
 
 
 @app.command("respawn")
