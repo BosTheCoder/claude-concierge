@@ -563,6 +563,7 @@ class Session:
             "jobId": self.job_id,
             "jobStatus": self.job_status,
             "tmux": self.tmux,
+            "tmuxTarget": self.tmux_target,
             "uuid": self.uuid,
             "cpuRate": None if self.cpu_rate is None else round(self.cpu_rate, 2),
             "transcriptAge": (

@@ -160,7 +160,10 @@ Full reference: **[docs/configuration.md](docs/configuration.md)**.
 | `concierge jobs` | active jobs, one line each |
 | `concierge status A3` | one job and its Remote Control link |
 | `concierge spawn <title> <brief> <cwd> <chat>` | start a job (the concierge calls this) |
-| `concierge notify <text> [--file f] [--status s]` | report back (a job calls this) |
+| `concierge notify <text> [--file f] [--status s]` | report back (a job calls this; with no job id, a hand-started session) |
+| `concierge context <message_id>` | what a Telegram message was, who sent it, and their task folder |
+| `concierge recent` | recent messages with senders, recent jobs, recent task folders |
+| `concierge send <job id or session uuid> <text>` | pass a message to a running job or tmux session, verified |
 | `concierge respawn A3` | restart a job the reboot interrupted, from its stored brief |
 | `concierge kill A3` | close a job's window |
 | `concierge ensure-up` | the whole supervision tick — what your scheduler runs |
@@ -217,6 +220,8 @@ classifier-gated prompts, which only interrupt on genuinely risky calls.
   ordering that keeps it from 404ing
 - [Notifications](docs/notifications.md) — keeping the machine's own noise out of
   the conversation
+- [Message log](docs/message-log.md) — how a reply is traced back to the session
+  and folder behind the message it answers
 
 ## Status
 

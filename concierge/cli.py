@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from concierge import config, publish, registry, spawn as spawn_mod, telegram, tmuxctl
+from concierge import config, messages, publish, registry, spawn as spawn_mod, telegram, tmuxctl
 from concierge.links import github_link, humanize_age
 
 app = typer.Typer(add_completion=False, help="Claude messaging concierge")
@@ -37,7 +37,7 @@ def format_status(job: dict, now: datetime) -> str:
 
 
 def notify(
-    job_id: str,
+    job_id: str | None,
     text: str,
     file: str | None = None,
     status: str | None = None,
@@ -48,7 +48,26 @@ def notify(
 
     The destination is derived from the job id by the host. Claude never
     supplies a chat id, so a job cannot message the wrong chat.
+
+    No job id means a session he started himself. That goes to the chat he
+    last used, logged under the session's own id (telegram.send reads it from
+    the environment), so a reply to it can still be traced back. Without this
+    such sessions hand-rolled `telegram.send(registry.last_chat(), ...)` —
+    the ethernet-cable session on 2026-09-14 did exactly that.
     """
+    if not job_id:
+        chat = registry.last_chat(state_path)
+        if not chat:
+            raise KeyError("no job id, and no chat on record to send to")
+        body = text
+        if file:
+            try:
+                body += "\n" + publish_and_link(file)
+            except Exception as exc:  # noqa: BLE001 - a broken link must not eat the message
+                body += f"\n{file} (no GitHub link: {exc})"
+        telegram.send(chat, body)
+        return
+
     jobs = registry.load(state_path)
     if job_id not in jobs:
         raise KeyError(f"unknown job: {job_id}")
@@ -63,6 +82,7 @@ def notify(
         body,
         reply_to=job.get("root_message_id"),
         prefix=f"[{job_id}] ",
+        origin={**messages.origin(), "job": job_id, "task_folder": job.get("task_folder")},
     )
     registry.remember_chat(job["chat_id"], state_path)
 
@@ -113,6 +133,7 @@ def send(
     state_path: Path | None = None,
     runner=None,
     sleeper=None,
+    live: dict | None = None,
 ) -> None:
     """Pass a message to a running job, and raise unless it was submitted.
 
@@ -120,9 +141,17 @@ def send(
     unsent in the job's input box. See tmuxctl.submit.
     """
     jobs = registry.load(state_path)
-    if job_id not in jobs:
-        raise KeyError(f"unknown job: {job_id}")
-    pane = f"{config.TMUX_SESSION}:{jobs[job_id].get('tmux_window') or job_id}"
+    if job_id in jobs:
+        pane = f"{config.TMUX_SESSION}:{jobs[job_id].get('tmux_window') or job_id}"
+    else:
+        # A session he started himself, addressed by the uuid `context` printed.
+        # Only one in tmux has a box to type into.
+        found = (messages.live_sessions() if live is None else live).get(job_id) or {}
+        pane = found.get("tmuxTarget")
+        if not pane:
+            raise KeyError(
+                f"unknown job, and no live tmux session with that id: {job_id}"
+            )
     problem = tmuxctl.submit(pane, text, runner=runner, sleeper=sleeper)
     if problem:
         raise RuntimeError(f"[{job_id}] not delivered: {problem}")
@@ -188,10 +217,7 @@ def resolve_notify_args(
         job_id, text = env_id, job_id
     else:
         job_id = job_id or env_id
-    if not job_id:
-        raise typer.BadParameter(
-            "no job id given and CONCIERGE_JOB_ID is not set in the environment"
-        )
+    # No id at all is a session he started himself; notify handles that.
     if not text:
         raise typer.BadParameter("no message text given")
     return job_id, text
@@ -229,9 +255,27 @@ def publish_and_link(path: str, cwd: Path | None = None, publisher=None) -> str:
     return github_link(root, "", relpath, branch=result.branch)
 
 
+@app.command("context")
+def context_cmd(
+    message_id: str,
+    chat: str = typer.Option(None, help="Defaults to the chat he last used"),
+):
+    """What a Telegram message was: its text, who sent it, their task folder,
+    and whether that session is still running. Start here for any reply."""
+    typer.echo(messages.context(message_id, chat))
+
+
+@app.command("recent")
+def recent_cmd(limit: int = typer.Option(12, help="How many messages")):
+    """Recent messages with their senders, recent jobs, recent task folders —
+    for a follow-up that was typed fresh instead of sent as a reply."""
+    typer.echo(messages.recent(limit))
+
+
 @app.command("send")
 def send_cmd(job_id: str, message: str):
-    """Pass a message to a running job and confirm it was submitted."""
+    """Pass a message to a running job — or to a session in tmux, by the uuid
+    `context` printed — and confirm it was submitted."""
     try:
         send(job_id, message)
     except (KeyError, RuntimeError) as exc:
@@ -291,6 +335,9 @@ def spawn_cmd(
 def ensure_up_cmd():
     from concierge import supervisor
 
+    # Before the start, so a concierge (re)started after a plugin update comes
+    # up with the patch rather than one tick later.
+    typer.echo(run_plugin_patch())
     typer.echo(supervisor.ensure_up())
     typer.echo(run_rc())
     typer.echo(run_reap())
@@ -388,6 +435,18 @@ def sessions_cmd():
     from concierge import rc
 
     typer.echo(rc.report())
+
+
+def run_plugin_patch() -> str:
+    """Re-patch the Telegram plugin after an update replaced it (plugin_patch.py).
+    Same total guard as the others: it must never stop the concierge coming up.
+    """
+    try:
+        from concierge import plugin_patch
+
+        return plugin_patch.ensure()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"plugin-patch-error: {exc}"
 
 
 def run_dashboard() -> str:

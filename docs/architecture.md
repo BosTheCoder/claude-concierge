@@ -38,6 +38,8 @@ its brief after a reboot killed it mid-flight.
 | `reaper.py` | Closes a stopped job's window, on rules that never touch a live one |
 | `sessions.py` | Every Claude process on the box, and whether it is still working |
 | `dashboard.py` | Serves that as a page, and keeps itself and its tailnet proxy up |
+| `messages.py` | The log of every message in and out, and `context`/`recent` over it |
+| `plugin_patch.py` | Re-applies the reply-context patch to the Telegram plugin after updates |
 
 `prompts/concierge.md` and `prompts/job.md` are the two system prompts. They're
 templates: `{{REPO_ROUTING}}` and `{{CONCIERGE_BIN}}` are substituted from

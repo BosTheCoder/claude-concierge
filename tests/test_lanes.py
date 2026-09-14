@@ -128,6 +128,7 @@ def test_a_broken_lane_module_does_not_break_ensure_up(monkeypatch):
 def test_ensure_up_runs_the_lanes(monkeypatch):
     from concierge import cli, supervisor
 
+    monkeypatch.setattr(cli, "run_plugin_patch", lambda: "plugin-patch: ok")
     monkeypatch.setattr(supervisor, "ensure_up", lambda: "healthy")
     monkeypatch.setattr(cli, "run_rc", lambda: "rc: all connected")
     monkeypatch.setattr(cli, "run_reap", lambda: "nothing-to-reap")
@@ -139,6 +140,7 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
     monkeypatch.setattr(cli.typer, "echo", printed.append)
     cli.ensure_up_cmd()
     assert printed == [
+        "plugin-patch: ok",
         "healthy",
         "rc: all connected",
         "nothing-to-reap",

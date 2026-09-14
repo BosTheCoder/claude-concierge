@@ -260,11 +260,6 @@ def test_resolve_notify_args_prefers_an_explicit_id():
         ("B7", "done")
 
 
-def test_resolve_notify_args_errors_when_the_id_is_nowhere():
-    with pytest.raises(typer.BadParameter, match="CONCIERGE_JOB_ID"):
-        cli.resolve_notify_args("all done", None, {})
-
-
 def test_resolve_notify_args_errors_without_any_text():
     with pytest.raises(typer.BadParameter, match="no message text"):
         cli.resolve_notify_args(None, None, {"CONCIERGE_JOB_ID": "A3"})
@@ -397,6 +392,16 @@ def _job(tmp_path):
     registry.upsert("E6", state, id="E6", status="waiting", chat_id="9",
                     title="t", tmux_window="E6")
     return state
+
+
+def test_send_reaches_a_hand_started_session_by_its_uuid(tmp_path):
+    pane = FakeClaudePane()
+    live = {"6c3bbe2b-786d-43c5-8263-96b806e98652": {"tmuxTarget": "work:2"}}
+
+    cli.send("6c3bbe2b-786d-43c5-8263-96b806e98652", LONG, state_path=_job(tmp_path),
+             runner=pane, sleeper=lambda s: None, live=live)
+
+    assert pane.submitted == [LONG]
 
 
 def test_send_submits_a_long_message_even_when_an_enter_is_dropped(tmp_path):

@@ -1,0 +1,89 @@
+--- a/server.ts	2026-09-14 09:24:23.761576058 +0100
++++ b/server.ts	2026-09-14 09:26:49.589390872 +0100
+@@ -19,7 +19,7 @@
+ import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
+ import type { ReactionTypeEmoji } from 'grammy/types'
+ import { randomBytes } from 'crypto'
+-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
++import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+ import { homedir } from 'os'
+ import { execFileSync } from 'child_process'
+ import { join, extname, sep } from 'path'
+@@ -30,6 +30,16 @@
+ const APPROVED_DIR = join(STATE_DIR, 'approved')
+ const ENV_FILE = join(STATE_DIR, '.env')
+ 
++// concierge-patch: reply-context v1 — see claude-concierge docs/message-log.md.
++// Every message in and every reply out, one JSON line each, so the id a reply
++// points at can be traced to what was said and which session said it.
++const MESSAGE_LOG = join(STATE_DIR, 'messages.jsonl')
++function logMessage(entry: Record<string, unknown>): void {
++  try {
++    appendFileSync(MESSAGE_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 })
++  } catch {}
++}
++
+ // Load ~/.claude/channels/telegram/.env into process.env. Real env wins.
+ // Plugin-spawned servers don't get an env block — this is where the token lives.
+ try {
+@@ -92,7 +102,8 @@
+ // Strict: no bare yes/no (conversational), no prefix/suffix chatter.
+ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
+ 
+-const bot = new Bot(TOKEN)
++// TELEGRAM_API_ROOT lets an incident be replayed against a fake Bot API.
++const bot = new Bot(TOKEN, process.env.TELEGRAM_API_ROOT ? { client: { apiRoot: process.env.TELEGRAM_API_ROOT } } : undefined)
+ let botUsername = ''
+ 
+ type PendingEntry = {
+@@ -565,6 +576,10 @@
+               ...(parseMode ? { parse_mode: parseMode } : {}),
+             })
+             sentIds.push(sent.message_id)
++            logMessage({
++              dir: 'out', via: 'plugin', chat_id, message_id: sent.message_id, text: chunks[i],
++              reply_to: shouldReplyTo ? reply_to : null, session: process.env.CLAUDE_CODE_SESSION_ID,
++            })
+           }
+         } catch (err) {
+           const msg = err instanceof Error ? err.message : String(err)
+@@ -588,6 +603,10 @@
+             const sent = await bot.api.sendDocument(chat_id, input, opts)
+             sentIds.push(sent.message_id)
+           }
++          logMessage({
++            dir: 'out', via: 'plugin', chat_id, message_id: sentIds[sentIds.length - 1],
++            text: `(file: ${f})`, reply_to: opts ? reply_to : null,
++          })
+         }
+ 
+         const result =
+@@ -965,6 +984,16 @@
+ 
+   const imagePath = downloadImage ? await downloadImage() : undefined
+ 
++  // concierge-patch: what this message replies to. Telegram sends it and
++  // upstream drops it, which leaves Claude unable to tell what "get 40m
++  // instead" is about. A partial quote he selected is the more specific text.
++  const replied = ctx.message?.reply_to_message
++  const quoted = ctx.message?.quote?.text ?? replied?.text ?? replied?.caption
++  logMessage({
++    dir: 'in', chat_id, message_id: msgId, user: from.username ?? String(from.id), text,
++    reply_to: replied?.message_id ?? null, reply_to_text: quoted ?? null,
++  })
++
+   // image_path goes in meta only — an in-content "[image attached — read: PATH]"
+   // annotation is forgeable by any allowlisted sender typing that string.
+   mcp.notification({
+@@ -977,6 +1006,11 @@
+         user: from.username ?? String(from.id),
+         user_id: String(from.id),
+         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
++        ...(replied ? {
++          reply_to_message_id: String(replied.message_id),
++          // Inside a tag attribute: same delimiter stripping as safeName.
++          ...(quoted ? { reply_to_text: quoted.replace(/[<>"\r\n;]+/g, ' ').slice(0, 300) } : {}),
++        } : {}),
+         ...(imagePath ? { image_path: imagePath } : {}),
+         ...(attachment ? {
+           attachment_kind: attachment.kind,

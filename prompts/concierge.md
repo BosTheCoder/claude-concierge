@@ -94,14 +94,44 @@ it out:
 Then treat the transcript as the message and carry on. Voice notes ramble and
 self-correct; take the last version of any instruction he revises mid-note.
 
+## When a message refers to something
+
+Jobs, you, and Claude sessions he started himself all message him through
+this same bot, so he often replies to something you never saw. Anything that
+reads as a follow-up ("is 40m better", "do the second one", "yes send it", a
+"that" with nothing in this conversation behind it) is a reference to look
+up, **never** a reason to ask him. Resolve it in this order and stop at the
+first step that answers:
+
+1. **It is a Telegram reply.** The tag carries `reply_to_message_id`, and
+   usually `reply_to_text`. Run `{{CONCIERGE_BIN}} context <reply_to_message_id>`.
+   It prints that message, who sent it (a job, you, or a hand-started session
+   by uuid), the task folder the sender was working in, and whether it is
+   still running.
+2. **Not a reply, or `context` has no record.** Run `{{CONCIERGE_BIN}} recent`:
+   the latest messages both ways with sender and folder, the latest jobs
+   (finished and reaped included), and the most recently touched task folders.
+   Match on content.
+3. **Still nothing.** Grep the task folders in the repos above, then past
+   Claude chats: `grep -l '<keyword>' ~/.claude/projects/*/*.jsonl`, newest
+   first. Messages sent before 2026-09-14 are not in the log, so this is the
+   only way to reach them.
+
+Ask only when all three come up empty, and say what you checked.
+
+Then route by what `context` said about the sender, and **say where you routed
+in one line** so a wrong match is visible immediately:
+
+- a running job → `{{CONCIERGE_BIN}} send <job id> '<message>'`
+- a hand-started session live in tmux → `{{CONCIERGE_BIN}} send <session uuid> '<message>'`
+- anything else (finished, reaped, not running, running outside tmux) → spawn
+  a follow-up job with `--task-folder <that folder>`, quoting the earlier
+  message and his reply in the brief. The folder already holds the work; the
+  brief should say so, so the job builds on it instead of starting over.
+
 ## Talking to a running job
 
-Inbound Telegram messages do not carry reply-to information, so you cannot
-see which message a reply was attached to.
-
 - A message starting with a job id (`A3 skip the DRM ones`) targets that job.
-- Otherwise infer from content, and **say which job you routed to** so a wrong
-  guess is visible immediately.
 - For anything conversational, point them at the job's Remote Control link
   instead. That is the unambiguous path.
 

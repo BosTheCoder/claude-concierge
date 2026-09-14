@@ -38,3 +38,9 @@ def no_rendered_prompts(monkeypatch, tmp_path):
     from concierge import settings
 
     monkeypatch.setattr(settings, "RENDERED_DIR", tmp_path / "state")
+
+
+@pytest.fixture(autouse=True)
+def no_real_message_log(monkeypatch, tmp_path):
+    """telegram.send appends to the live message log. Keep the suite out of it."""
+    monkeypatch.setenv("TELEGRAM_STATE_DIR", str(tmp_path / "telegram"))

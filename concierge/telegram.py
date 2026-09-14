@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.request
 from pathlib import Path
 
-from concierge import config
+from concierge import config, messages
 
-API = "https://api.telegram.org/bot{token}/sendMessage"
+# The override exists for replaying an incident against a fake Bot API; the
+# patched plugin reads the same variable.
+API = os.environ.get("TELEGRAM_API_ROOT", "https://api.telegram.org") + "/bot{token}/sendMessage"
 LIMIT = 4096
 
 
@@ -74,10 +77,17 @@ def send(
     prefix: str = "",
     token: str | None = None,
     poster=None,
+    origin: dict | None = None,
 ) -> list[dict]:
+    """Send, and log each part with who sent it — see messages.py.
+
+    Logged here rather than in `notify` because this is the one function every
+    Python sender reaches, including sessions that import it directly.
+    """
     token = token or load_token()
     poster = poster or _post
     url = API.format(token=token)
+    sender = origin if origin is not None else messages.origin()
 
     results = []
     # Every chunk carries the prefix, so a split message stays identifiable.
@@ -86,5 +96,14 @@ def send(
         # Thread only the first chunk, matching the plugin's own 'first' mode.
         if reply_to is not None and i == 0:
             payload["reply_parameters"] = {"message_id": reply_to}
-        results.append(poster(url, payload))
+        data = poster(url, payload)
+        results.append(data)
+        messages.record({
+            "dir": "out",
+            "chat_id": str(chat_id),
+            "message_id": ((data or {}).get("result") or {}).get("message_id"),
+            "text": payload["text"],
+            "reply_to": payload.get("reply_parameters", {}).get("message_id"),
+            **sender,
+        })
     return results
