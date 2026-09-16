@@ -171,6 +171,12 @@ def handler_for(sampler: Sampler):
             if self.path in ("/", "/index.html"):
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
                 return
+            if self.path == "/manifest.webmanifest":
+                self._send(200, MANIFEST.encode(), "application/manifest+json")
+                return
+            if self.path == "/icon-512.png":
+                self._send(200, ICON.read_bytes(), "image/png")
+                return
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
@@ -371,6 +377,14 @@ def serve(
         server.server_close()
 
 
+# Installable as a phone app (Chrome also needs HTTPS: tailscale serve --https=18787).
+MANIFEST = json.dumps({
+    "name": "Claude sessions", "short_name": "Sessions", "start_url": "/", "scope": "/",
+    "display": "standalone", "background_color": "#0e1116", "theme_color": "#0e1116",
+    "icons": [{"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
+})
+ICON = Path(__file__).with_name("icon-512.png")
+
 PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -379,6 +393,9 @@ PAGE = r"""<!doctype html>
 <meta name="color-scheme" content="dark">
 <title>Claude sessions</title>
 <link rel="icon" href="data:,">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-512.png">
+<meta name="theme-color" content="#0e1116">
 <style>
   :root {
     --bg: #0e1116; --card: #171b22; --line: #262c36; --ink: #e6edf3;
