@@ -38,11 +38,12 @@ unprompted.
 
 | Source | Example |
 |---|---|
-| `heartbeat` | `job-tracker sourcing: no successful run in 34h` |
+| `heartbeat` | `job-tracker sourcing: no successful run in 34h` (no watches configured since 2026-10-03; Healthchecks covers job-tracker) |
+| `rc-server` | `the Remote Control server … couldn't restart it` (only a failed restart; a successful one is silent) |
 | `supervisor` | `concierge failed to start: …` |
 | `supervisor` | `concierge NOT started — these env vars break Remote Control…` |
 | `supervisor` | `[R0] was mid-flight when the machine restarted` |
-| Healthchecks | `🔴 bootstrap-sync is DOWN` |
+| Healthchecks | `🔴 bootstrap-sync is DOWN` (down only; no "back up") |
 | `play check` (08:00) | `✗ Instagram  expired  → insta-watch/refresh-cookies` |
 
 `play` is outside the concierge and routes itself: it reads
@@ -123,3 +124,16 @@ conversation works exactly as it did.
 
 Granting the group inbound access is a separate, deliberate step
 (`/telegram:access`) and is Bosire's to take if he ever wants it.
+
+## 2026-10-03: the DM was still full of machine noise
+
+The routing above only ever covered the concierge's own senders. Healthchecks'
+webhook had never been re-pointed, so its alerts, about 180 in the fortnight to
+3 Oct and half of them "back up", still went to the DM. Inside the group the
+bulk was the Remote Control check misreading an idle server (139 messages).
+Both fixed at source; the full inventory is in
+`tasks/2026-10-03-alert-noise-cleanup/findings.md`.
+
+The rule since: a machine message goes to the group, says something is wrong
+*now*, and is sent once per incident. Recoveries and successful self-repairs
+are not sent.
