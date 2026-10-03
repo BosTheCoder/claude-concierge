@@ -26,8 +26,11 @@ relies on has nothing to read here. (The same measurement is why rc.py is safe:
 never type `/rc` into a server pane.)
 
 What the pane says, from the CLI's own renderer: `Connecting` while it comes
-up, the session title once connected, and `Reconnecting · retrying in Xs ·
-disconnected Ys` while its backoff runs. That backoff is real and usually
+up, `Ready` while connected with no session attached, `Connected` once one is,
+and `Reconnecting · retrying in Xs · disconnected Ys` while its backoff runs.
+`Ready` was missing until 2026-10-03, so an idle server read as "unknown" and was
+recycled every twenty minutes it sat unused: 139 false alerts in a fortnight,
+and an empty chat in the app for every restart. That backoff is real and usually
 wins — a ten-minute network drop recovers on its own — so a single bad reading
 must not trigger a restart. Only a run of them does, because recycling the
 window kills whatever was open from the phone.
@@ -70,9 +73,10 @@ LOG_TAIL_BYTES = 256 * 1024
 
 # Word boundaries because "Connecting" contains no "Connected" but the eye
 # does not have to be fooled for a substring check to be.
-STATUS = re.compile(r"\b(Reconnecting|Connecting|Connected)\b")
+STATUS = re.compile(r"\b(Reconnecting|Connecting|Connected|Ready)\b")
 _STATUS_NAMES = {
     "Connected": "connected",
+    "Ready": "ready",
     "Connecting": "connecting",
     "Reconnecting": "reconnecting",
 }
@@ -92,7 +96,7 @@ def server_argv() -> list[str]:
 
 
 def pane_status(pane_text: str) -> str:
-    """connected | connecting | reconnecting | unknown.
+    """connected | ready | connecting | reconnecting | unknown.
 
     The last match wins. The banner printed at startup stays above the status
     line, so a pane that has been up for a day still has the word "Connecting"
@@ -204,6 +208,15 @@ def _start(tmux) -> None:
         return
     if config.RC_SERVER_WINDOW in tmux.list_windows(config.RC_SERVER_TMUX_SESSION):
         tmux.kill_window(config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW)
+    if not tmux.has_session(config.RC_SERVER_TMUX_SESSION):
+        # Killing a session's only window kills the session, so new-window then
+        # has nothing to attach to ("can't find window: rc"). Every recycle hit
+        # this until 2026-10-03.
+        tmux.new_session(
+            config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW, shell_command
+        )
+        _capture_output(tmux)
+        return
     tmux.new_window(
         config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW, shell_command
     )
@@ -278,7 +291,7 @@ def ensure_up(
     status = pane_status(
         tmux.capture(config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW)
     )
-    if status == "connected":
+    if status in ("connected", "ready"):
         if state.get("strikes"):
             state["strikes"] = 0
             save_state(state, state_path)
@@ -309,9 +322,6 @@ def ensure_up(
         )
         return f"recycle-failed: {exc}"
 
-    notifier(
-        f"the Remote Control server on {config.RC_SERVER_NAME} was {status} for "
-        f"{DEGRADED_STRIKES * TICK_MINUTES} minutes, so I restarted it. Anything "
-        f"you had open on it from the phone is gone — start a new session."
-    )
+    # Silent on success: a restart that worked needs nothing from him, and the
+    # history above keeps the record. Only a failed restart is worth a message.
     return "recycled"

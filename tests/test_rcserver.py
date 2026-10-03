@@ -19,6 +19,18 @@ Continue coding in the Claude mobile app or https://claude.ai/code?environment=e
 space to show QR code · w to toggle spawn mode
 """
 
+# What an idle server shows: connected, no session attached. Rendered by the
+# same line as CONNECTED with the word swapped (claude 2.1.288, updateIdleStatus).
+READY = """\
+Remote Control v2.1.288
+Connecting to claude.ai...
+
+·✔︎· Ready · tasks · main
+    Capacity: 0/32 · New sessions will be created in the current directory
+
+space to show QR code · w to toggle spawn mode
+"""
+
 RECONNECTING = """\
 Remote Control v2.1.231
 Connecting to claude.ai...
@@ -58,6 +70,7 @@ class FakeTmux:
         self.calls.append(("new_session", session, window))
         self.started.append(shell_command)
         self.sessions.add(session)
+        self._windows = [window]
 
     def new_window(self, session, window, shell_command):
         self.calls.append(("new_window", session, window))
@@ -65,6 +78,11 @@ class FakeTmux:
 
     def kill_window(self, session, window):
         self.calls.append(("kill_window", session, window))
+        # As real tmux does: killing the last window takes the session with it.
+        if window in self._windows:
+            self._windows.remove(window)
+        if not self._windows:
+            self.sessions.discard(session)
 
     def pipe_pane(self, session, window, command):
         self.calls.append(("pipe_pane", session, window))
@@ -156,7 +174,9 @@ def test_starts_the_server_when_there_is_no_session(state):
 def test_replaces_a_dead_window_without_killing_the_session(state):
     """kill_window, not kill_session: `new_session` fails on a session that is
     already there, and the session may hold other windows."""
-    tmux = FakeTmux(sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="zsh")
+    tmux = FakeTmux(
+        sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="zsh", windows=("0", "1")
+    )
     result, _ = run(tmux, state)
 
     assert result == "started"
@@ -208,7 +228,18 @@ def test_one_bad_reading_does_not_restart_anything(state):
     assert notes == []
 
 
-def test_recycles_and_speaks_up_once_the_strikes_run_out(state):
+def test_an_idle_server_is_healthy(state):
+    """No session attached reads "Ready", not "Connected". Treating that as
+    unknown recycled an idle server every twenty minutes."""
+    tmux = FakeTmux(
+        sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="claude", pane=READY
+    )
+    for _ in range(rcserver.DEGRADED_STRIKES + 1):
+        assert run(tmux, state) == ("healthy", [])
+    assert tmux.calls == []
+
+
+def test_recycles_quietly_once_the_strikes_run_out(state):
     tmux = FakeTmux(
         sessions={config.RC_SERVER_TMUX_SESSION},
         window_cmd="claude",
@@ -220,10 +251,11 @@ def test_recycles_and_speaks_up_once_the_strikes_run_out(state):
     result, notes = run(tmux, state)
 
     assert result == "recycled"
-    assert ("new_window", config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW) \
-        in tmux.calls
-    assert len(notes) == 1
-    assert "restarted it" in notes[0]
+    # The only window was killed, so the session went with it and has to be
+    # recreated, not added to.
+    assert tmux.calls[-2][0] == "new_session"
+    assert config.RC_SERVER_TMUX_SESSION in tmux.sessions
+    assert notes == []
     # Counted from zero again, or a flapping server alerts every tick.
     assert rcserver.load_state(state).get("strikes") == 0
 
