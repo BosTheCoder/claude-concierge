@@ -38,7 +38,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from concierge import config, sessions, settings as settings_mod, tmuxctl
+from concierge import config, registry, sessions, settings as settings_mod, spawn, tmuxctl
 
 # Fast enough that a reap shows up on the next poll, slow enough that the
 # dashboard is not itself a load on the machine it exists to relieve. One poll
@@ -145,6 +145,64 @@ class Sampler:
         self._stop.set()
 
 
+# --- the Claude button ---------------------------------------------------------
+# Any page on the tailnet host loads /claude/claude.js and POSTs /claude/api/spawn to
+# start a job seeded with what the page shows. Tailscale Serve maps /claude here and
+# strips the prefix; the dashboard's own port serves it bare. Both are accepted.
+# Spec: docs/superpowers/specs/2026-10-30-claude-button-design.md
+
+CLAUDE_PREFIX = "/claude"
+CLAUDE_JS = Path(__file__).with_name("claude.js")
+SPAWN_LIMITS = {"title": 120, "cwd": 300, "context": 30_000, "note": 4_000, "page": 500}
+
+
+def job_brief(page: str, note: str, context: str) -> str:
+    return (
+        f"Started from a button on {page or 'one of his pages'} by Kelvin.\n\n"
+        f"His note: {note or 'none. Work out what is needed from what he was looking at.'}\n\n"
+        "Use a task folder only if this repo's CLAUDE.md asks for one.\n\n"
+        f"What he was looking at:\n{context or '(nothing was passed)'}"
+    )
+
+
+def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple[int, dict]:
+    """POST /api/spawn → (status, payload). Never raises: a 500 says what broke."""
+    # A page on another site could otherwise start sessions through his browser.
+    if (headers.get("Sec-Fetch-Site") or "") == "cross-site":
+        return 403, {"ok": False, "error": "cross-site request refused"}
+    if not (headers.get("Content-Type") or "").startswith("application/json"):
+        return 400, {"ok": False, "error": "send JSON"}
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        return 400, {"ok": False, "error": "body is not JSON"}
+    if not isinstance(body, dict):
+        return 400, {"ok": False, "error": "body must be an object"}
+    fields = {k: body.get(k) or "" for k in SPAWN_LIMITS}
+    for k, v in fields.items():
+        if not isinstance(v, str):
+            return 400, {"ok": False, "error": f"{k} must be text"}
+        if len(v) > SPAWN_LIMITS[k]:
+            return 400, {"ok": False, "error": f"{k} is over {SPAWN_LIMITS[k]} characters"}
+    if not fields["title"].strip() or not fields["cwd"].strip():
+        return 400, {"ok": False, "error": "need a title and a cwd"}
+    chat = (last_chat or registry.last_chat)()
+    if not chat:
+        return 503, {"ok": False, "error": "the concierge has no Telegram chat yet; message it once"}
+    try:
+        job = (spawner or spawn.spawn_job)(
+            title=fields["title"].strip(),
+            brief=job_brief(fields["page"], fields["note"].strip(), fields["context"]),
+            cwd=fields["cwd"],
+            chat_id=chat,
+        )
+    except ValueError as exc:  # resolve_cwd: not a repo in concierge.toml
+        return 400, {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - report, never 500 silently
+        return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return 200, {"ok": True, "id": job["id"], "rc_url": job.get("rc_url")}
+
+
 def handler_for(sampler: Sampler):
     class Handler(BaseHTTPRequestHandler):
         server_version = "concierge-dashboard"
@@ -164,7 +222,14 @@ def handler_for(sampler: Sampler):
         def _json(self, status: int, payload: dict) -> None:
             self._send(status, json.dumps(payload).encode(), "application/json")
 
+        def _route(self) -> str:
+            path = self.path.split("?")[0]
+            return path[len(CLAUDE_PREFIX):] if path.startswith(CLAUDE_PREFIX + "/") else path
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
+            if self._route() == "/claude.js":
+                self._send(200, CLAUDE_JS.read_bytes(), "text/javascript; charset=utf-8")
+                return
             if self.path.split("?")[0] == "/api/sessions":
                 self._json(200, sessions.snapshot(sampler.rates()))
                 return
@@ -180,6 +245,10 @@ def handler_for(sampler: Sampler):
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
+            if self._route() == "/api/spawn":
+                length = int(self.headers.get("Content-Length") or 0)
+                self._json(*spawn_request(self.headers, self.rfile.read(length)))
+                return
             if self.path != "/api/reap":
                 self._send(404, b"no", "text/plain")
                 return

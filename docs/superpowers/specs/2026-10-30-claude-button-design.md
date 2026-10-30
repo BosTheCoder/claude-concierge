@@ -37,10 +37,12 @@ the prefix, so every app on `bos-desktop.fish-grouper.ts.net` reaches it
 
 ```html
 <script src="/claude/claude.js"></script>
-<script>claudeButton(el, {title: "…", cwd: "~/projects/personal/<repo>", context: () => "…"})</script>
+<button onclick='claudeAsk({title: "…", cwd: "~/projects/personal/<repo>", context: () => "…"})'>✦</button>
 ```
 
-`context` is a function so it reads the page's state at tap time.
+The page draws its own ✦ buttons; `claudeAsk` opens the sheet. `context` can be a
+function so it reads the page's state at tap time. `cwd` must be a repo listed in
+`concierge.toml`.
 
 **The brief the job gets:**
 
