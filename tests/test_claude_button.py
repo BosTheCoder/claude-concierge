@@ -62,6 +62,7 @@ def test_a_tap_starts_a_job_carrying_the_note_and_the_context(server, path):
 
 @pytest.mark.parametrize("change, headers, status", [
     ({}, {"Sec-Fetch-Site": "cross-site"}, 403),
+    ({}, {"Origin": "http://evil.test:8787"}, 403),
     ({}, {"Content-Type": "text/plain"}, 400),
     ({"cwd": "/nope"}, {}, 400),
     ({"title": ""}, {}, 400),
@@ -92,5 +93,20 @@ def test_a_job_stuck_on_the_trust_prompt_is_not_reported_as_started(server, monk
     from concierge import tmuxctl
     monkeypatch.setattr(spawn, "spawn_job", lambda **kw: {"id": "A8", "rc_url": None})
     monkeypatch.setattr(tmuxctl, "capture", lambda session, window: "Quick safety check: " + dashboard.TRUST_PROMPT + "?")
+    closed, marked = [], []
+    monkeypatch.setattr(tmuxctl, "kill_window", lambda session, window: closed.append(window))
+    monkeypatch.setattr(registry, "upsert", lambda job_id, path=None, **kw: marked.append((job_id, kw)))
     code, body = post(base + "/api/spawn", GOOD)
     assert code == 409 and "A8" in body["error"]
+    assert closed == ["A8"] and marked == [("A8", {"status": "failed"})]
+
+
+def test_a_bad_body_length_gets_an_answer_not_a_hang(server):
+    import http.client
+    base, calls = server
+    conn = http.client.HTTPConnection(base.removeprefix("http://"), timeout=5)
+    conn.putrequest("POST", "/api/spawn")
+    conn.putheader("Content-Type", "application/json")
+    conn.putheader("Content-Length", "-1")
+    conn.endheaders()
+    assert conn.getresponse().status == 400 and calls == []

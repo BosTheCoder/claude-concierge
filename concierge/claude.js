@@ -71,7 +71,7 @@
   }
 
   window.claudeAsk = o => {
-    if (busy) return;  // one start at a time; the open sheet can't be closed while it waits
+    if (busy) { if (!dlg.open) dlg.showModal(); return; }  // one start at a time: show the one still waiting
     if (!dlg) build();
     opts = o || {};
     $(".cl-t").textContent = opts.title || "";
