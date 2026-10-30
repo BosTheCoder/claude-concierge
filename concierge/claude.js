@@ -11,7 +11,7 @@
     border-radius:16px; padding:16px; background:var(--card, Canvas); color:var(--ink, CanvasText);
     font:16px/1.4 system-ui, sans-serif; color-scheme:light dark; box-sizing:border-box }
   .cl-sheet::backdrop { background:#0008 }
-  .cl-sheet h2 { margin:0 0 4px; font-size:17px }
+  .cl-sheet h2 { margin:0 0 4px; font-size:17px; font-weight:700; text-transform:none; letter-spacing:normal; color:inherit }
   .cl-sheet .cl-t { margin:0 0 12px; color:var(--mute, GrayText); font-size:14px; overflow-wrap:anywhere }
   .cl-sheet textarea { width:100%; box-sizing:border-box; min-height:84px; padding:10px 12px; border:1px solid var(--line, #8884);
     border-radius:12px; background:var(--bg, Field); color:inherit; font:inherit; resize:vertical }

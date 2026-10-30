@@ -85,3 +85,12 @@ def test_the_widget_is_served_under_the_prefix(server):
     base, _ = server
     with urllib.request.urlopen(base + "/claude/claude.js") as r:
         assert r.status == 200 and b"claudeAsk" in r.read()
+
+
+def test_a_job_stuck_on_the_trust_prompt_is_not_reported_as_started(server, monkeypatch):
+    base, _ = server
+    from concierge import tmuxctl
+    monkeypatch.setattr(spawn, "spawn_job", lambda **kw: {"id": "A8", "rc_url": None})
+    monkeypatch.setattr(tmuxctl, "capture", lambda session, window: "Quick safety check: " + dashboard.TRUST_PROMPT + "?")
+    code, body = post(base + "/api/spawn", GOOD)
+    assert code == 409 and "A8" in body["error"]

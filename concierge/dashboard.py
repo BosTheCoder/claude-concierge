@@ -153,6 +153,7 @@ class Sampler:
 
 CLAUDE_PREFIX = "/claude"
 CLAUDE_JS = Path(__file__).with_name("claude.js")
+TRUST_PROMPT = "Is this a project you created or one you trust"
 SPAWN_LIMITS = {"title": 120, "cwd": 300, "context": 30_000, "note": 4_000, "page": 500}
 
 
@@ -200,6 +201,11 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
         return 400, {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - report, never 500 silently
         return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    # A repo never opened interactively stops the job at Claude Code's trust prompt,
+    # which a page can't answer. Say so rather than "started".
+    if not job.get("rc_url") and TRUST_PROMPT in tmuxctl.capture(config.TMUX_SESSION, job["id"]):
+        return 409, {"ok": False, "error": f"{job['id']} is stuck on Claude Code's 'trust this folder' prompt for "
+                     f"{fields['cwd']}. Open claude there once, say yes, then try again."}
     return 200, {"ok": True, "id": job["id"], "rc_url": job.get("rc_url")}
 
 
