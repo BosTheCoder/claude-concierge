@@ -82,6 +82,7 @@ in one cannot stop the concierge from starting:
   this, because the dashboard is inside the thing that stopped.
 - **[fast lanes](docs/fast-lanes.md):** work that has to happen within minutes
   rather than at the next cron boundary.
+- **Claude button:** any page on the tailnet host can start a job seeded with what it shows: load `/claude/claude.js`, call `claudeAsk({title, cwd, context})` from a ✦ button. Served by the dashboard; Tailscale Serve maps `/claude` to it. The `cwd` must be a repo in `concierge.toml`, opened in `claude` once so the folder is trusted. [Spec](docs/superpowers/specs/2026-10-30-claude-button-design.md).
 - **[dashboard](docs/dashboard.md):** the reaper only knows about jobs. This is
   a page listing *every* Claude process on the machine — hand-started sessions
   included — with what state each is in and a button to close the idle ones.
