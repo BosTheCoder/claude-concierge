@@ -35,6 +35,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -160,6 +161,9 @@ SPAWN_ORIGINS = {"https://bos-desktop.fish-grouper.ts.net", "https://bos-desktop
                  "http://127.0.0.1:8787", "http://localhost:8787"}
 MAX_BODY = 64_000
 SPAWN_LIMITS = {"title": 120, "cwd": 300, "context": 30_000, "note": 4_000, "page": 500}
+# allocate_id and upsert read the registry then rewrite it. Two taps at once, or a tap
+# and a finishing start, would otherwise share an id or drop each other's write.
+REGISTRY_LOCK = threading.Lock()
 
 
 def job_brief(page: str, note: str, context: str) -> str:
@@ -199,24 +203,48 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
     if not chat:
         return 503, {"ok": False, "error": "the concierge has no Telegram chat yet; message it once"}
     try:
-        job = (spawner or spawn.spawn_job)(
-            title=fields["title"].strip(),
-            brief=job_brief(fields["page"], fields["note"].strip(), fields["context"]),
-            cwd=fields["cwd"],
-            chat_id=chat,
-        )
+        # Reply as soon as the window exists; the up-to-20 s wait for the chat URL runs in
+        # finish_start, and the page's tray picks the link up from /api/jobs.
+        with REGISTRY_LOCK:
+            job = (spawner or spawn.spawn_job)(
+                title=fields["title"].strip(),
+                brief=job_brief(fields["page"], fields["note"].strip(), fields["context"]),
+                cwd=fields["cwd"],
+                chat_id=chat,
+                poller=lambda _window: None,
+            )
     except ValueError as exc:  # resolve_cwd: not a repo in concierge.toml
         return 400, {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - report, never 500 silently
         return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    # A repo never opened interactively stops the job at Claude Code's trust prompt,
-    # which a page can't answer. Say so rather than "started".
-    if not job.get("rc_url") and TRUST_PROMPT in tmuxctl.capture(config.TMUX_SESSION, job["id"]):
-        tmuxctl.kill_window(config.TMUX_SESSION, job["id"])  # or a retry leaves a second stuck job
-        registry.upsert(job["id"], status="failed")
-        return 409, {"ok": False, "error": f"{job['id']} is stuck on Claude Code's 'trust this folder' prompt for "
-                     f"{fields['cwd']}. Open claude there once, say yes, then try again."}
+    threading.Thread(target=finish_start, args=(job["id"], fields["cwd"]), daemon=True).start()
     return 200, {"ok": True, "id": job["id"], "rc_url": job.get("rc_url")}
+
+
+def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
+    """After the reply: record the chat URL, or why it never came."""
+    url = (poller or spawn.poll_for_rc_url)(job_id)
+    with REGISTRY_LOCK:
+        if url:
+            registry.upsert(job_id, rc_url=url, claude_session_id=spawn.session_id_from_url(url))
+        # A repo never opened interactively stops the job at Claude Code's trust prompt,
+        # which a page can't answer.
+        elif TRUST_PROMPT in tmuxctl.capture(config.TMUX_SESSION, job_id):
+            tmuxctl.kill_window(config.TMUX_SESSION, job_id)  # or a retry leaves a second stuck job
+            registry.upsert(job_id, status="failed", error=f"stuck on the 'trust this folder' prompt for {cwd}. "
+                            "Open claude there once, say yes, then try again.")
+        elif job_id not in tmuxctl.list_windows(config.TMUX_SESSION):
+            registry.upsert(job_id, status="failed", error="the session closed on startup")
+        # else: slow to print its URL. It is still in the Claude app as "[id] title".
+
+
+def recent_jobs(hours: int = 24, *, load=None) -> list[dict]:
+    """What the page's tray lists: jobs opened in the last day, newest first."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+    jobs = [j for j in (load or registry.load)().values() if (j.get("opened_at") or "") >= cutoff]
+    jobs.sort(key=lambda j: j.get("opened_at") or "", reverse=True)
+    keep = ("id", "title", "status", "rc_url", "error", "opened_at")
+    return [{k: j.get(k) for k in keep} for j in jobs[:15]]
 
 
 def handler_for(sampler: Sampler):
@@ -245,6 +273,9 @@ def handler_for(sampler: Sampler):
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
             if self._route() == "/claude.js":
                 self._send(200, CLAUDE_JS.read_bytes(), "text/javascript; charset=utf-8")
+                return
+            if self._route() == "/api/jobs":
+                self._json(200, {"jobs": recent_jobs()})
                 return
             if self.path.split("?")[0] == "/api/sessions":
                 self._json(200, sessions.snapshot(sampler.rates()))
