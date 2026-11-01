@@ -239,6 +239,17 @@ def test_an_idle_server_is_healthy(state):
     assert tmux.calls == []
 
 
+def test_a_pane_with_no_status_word_is_never_recycled(state):
+    """With enough chats open the status line scrolls off a 24-line pane.
+    Recycling then deletes the environment and kills every open chat."""
+    tmux = FakeTmux(
+        sessions={config.RC_SERVER_TMUX_SESSION}, window_cmd="claude", pane=""
+    )
+    for _ in range(rcserver.DEGRADED_STRIKES * 3):
+        run(tmux, state)
+    assert tmux.calls == []
+
+
 def test_recycles_quietly_once_the_strikes_run_out(state):
     tmux = FakeTmux(
         sessions={config.RC_SERVER_TMUX_SESSION},

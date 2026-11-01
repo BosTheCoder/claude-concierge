@@ -291,6 +291,15 @@ def ensure_up(
     status = pane_status(
         tmux.capture(config.RC_SERVER_TMUX_SESSION, config.RC_SERVER_WINDOW)
     )
+    if status == "unknown":
+        # No status word on screen is not evidence of a fault. Measured
+        # 2026-11-01: the pane is 80x24, and the session list sits under the
+        # status line, so with enough chats open "Connected" scrolls off the
+        # top. Recycling on that killed a healthy server ~15 times in October,
+        # and every restart registers a new environment and deletes the old
+        # one, so each open chat in the app died with "environment was
+        # deleted". A server that has actually died is caught by alive().
+        return "unknown"
     if status in ("connected", "ready"):
         if state.get("strikes"):
             state["strikes"] = 0
