@@ -331,6 +331,26 @@ def spawn_cmd(
     typer.echo(job.get("rc_url") or "")
 
 
+@app.command("later")
+def later_cmd(
+    when: str = typer.Argument(..., help="ISO datetime, UK time unless it has an offset"),
+    title: str = typer.Argument(...),
+    brief: str = typer.Argument(...),
+    cwd: str = typer.Option(None, help="Repo to run in; defaults to the current one"),
+):
+    """Spawn a job with this brief at a set time (checked by ensure-up)."""
+    from concierge import later
+
+    # Same chat as the job asking, else the last one he used: never typed in.
+    job_id = os.environ.get("CONCIERGE_JOB_ID")
+    chat = (registry.load().get(job_id) or {}).get("chat_id") if job_id else None
+    chat = chat or registry.last_chat()
+    if not chat:
+        raise typer.BadParameter("no chat to report to")
+    entry = later.add(when, title, brief, cwd or os.getcwd(), chat)
+    typer.echo(f"queued for {entry['when']}: {title}")
+
+
 @app.command("ensure-up")
 def ensure_up_cmd():
     from concierge import supervisor
@@ -343,6 +363,7 @@ def ensure_up_cmd():
     typer.echo(run_reap())
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
+    typer.echo(run_later())
     typer.echo(run_dashboard())
 
 
@@ -519,6 +540,16 @@ def run_lanes() -> str:
         return lanes.run_all()
     except Exception as exc:  # noqa: BLE001 - deliberately total
         return f"lanes-error: {exc}"
+
+
+def run_later() -> str:
+    """Scheduled jobs ride ensure-up too (see later.py). Same total guard."""
+    try:
+        from concierge import later
+
+        return later.run_due()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"later-error: {exc}"
 
 
 if __name__ == "__main__":
