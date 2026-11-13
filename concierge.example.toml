@@ -152,3 +152,15 @@ spawn_mode = "same-dir"
 #
 # # ...and closes this long after that nudge if it is still unanswered.
 # waiting_grace_hours = 6
+
+
+# --- the threads app ----------------------------------------------------------
+#
+# The phone page at <base_url>/app. Alerts go to glance (its "alarms from other
+# apps" feature) on a topic derived from alarm_account. mirror_to_telegram also
+# sends job messages to Telegram, for while the app is new.
+
+[app]
+base_url = "https://your-machine.your-tailnet.ts.net:18787"
+alarm_account = "you@gmail.com"
+mirror_to_telegram = true

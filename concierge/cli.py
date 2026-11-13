@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,7 +66,15 @@ def notify(
                 body += "\n" + publish_and_link(file)
             except Exception as exc:  # noqa: BLE001 - a broken link must not eat the message
                 body += f"\n{file} (no GitHub link: {exc})"
-        telegram.send(chat, body)
+        sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+        if sid and config.SETTINGS.app.base_url:
+            from concierge import threads
+
+            with threads.connect() as db:
+                th = threads.find_or_create(db, job=f"session:{sid}", title=f"Session in {Path.cwd().name}")
+                threads.post(db, th, body, urgency="needs")
+        if config.SETTINGS.app.mirror_to_telegram or not config.SETTINGS.app.base_url:
+            telegram.send(chat, body)
         return
 
     jobs = registry.load(state_path)
@@ -77,14 +86,16 @@ def notify(
     if file:
         body += "\n" + attach(job, file)
 
-    telegram.send(
-        job["chat_id"],
-        body,
-        reply_to=job.get("root_message_id"),
-        prefix=f"[{job_id}] ",
-        origin={**messages.origin(), "job": job_id, "task_folder": job.get("task_folder")},
-    )
-    registry.remember_chat(job["chat_id"], state_path)
+    to_thread(job_id, job, body, status)
+    if config.SETTINGS.app.mirror_to_telegram or not config.SETTINGS.app.base_url:
+        telegram.send(
+            job["chat_id"],
+            body,
+            reply_to=job.get("root_message_id"),
+            prefix=f"[{job_id}] ",
+            origin={**messages.origin(), "job": job_id, "task_folder": job.get("task_folder")},
+        )
+        registry.remember_chat(job["chat_id"], state_path)
 
     # Kept so the reaper can quote a blocked job's question back at him before
     # closing it — a `waiting` job reaped silently loses whatever it asked.
@@ -95,6 +106,24 @@ def notify(
         # A job that answers and goes back to work starts its wait afresh.
         fields["nudged_at"] = None
     registry.upsert(job_id, state_path, **fields)
+
+
+def to_thread(job_id: str, job: dict, body: str, status: str | None, *, db=None) -> None:
+    """A job's `notify` lands in its thread in the app. `done` closes the thread.
+    Never raises: the Telegram mirror (or stderr) must still get the message."""
+    if not config.SETTINGS.app.base_url and db is None:
+        return
+    from concierge import threads
+
+    try:
+        db = db or threads.connect()
+        th = threads.find_or_create(db, job=job_id, title=job.get("title") or job_id,
+                                    pane=f"{config.TMUX_SESSION}:{job.get('tmux_window') or job_id}")
+        threads.post(db, th, body, urgency="needs")
+        if status in config.FINISHED_STATUSES:
+            threads.close(db, th["id"])
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"thread not updated: {exc}", err=True)
 
 
 def attach(job: dict, file: str, publisher=None) -> str:
@@ -554,3 +583,140 @@ def run_later() -> str:
 
 if __name__ == "__main__":
     app()
+
+
+# --- threads: what the app shows (threads.py) -----------------------------------------
+def _thread_target(thread: str | None, env: dict | None = None) -> dict:
+    """Which thread a session means, from --thread and its environment.
+
+    A concierge job is known by CONCIERGE_JOB_ID; a session started some other way
+    (13 Edward) sets CONCIERGE_THREAD_JOB and CONCIERGE_THREAD_PANE when it starts.
+    """
+    env = os.environ if env is None else env
+    if thread and thread.isdigit():
+        return {"thread_id": int(thread), "job": None, "title": None, "pane": None}
+    job_id = env.get("CONCIERGE_JOB_ID")
+    if job_id:
+        job = registry.load().get(job_id) or {}
+        return {"thread_id": None, "job": job_id, "title": thread or job.get("title") or job_id,
+                "pane": f"{config.TMUX_SESSION}:{job.get('tmux_window') or job_id}"}
+    job = env.get("CONCIERGE_THREAD_JOB")
+    if not job:
+        raise typer.BadParameter("not a concierge job: give --thread <id>, or set CONCIERGE_THREAD_JOB")
+    return {"thread_id": None, "job": job, "title": thread, "pane": env.get("CONCIERGE_THREAD_PANE")}
+
+
+def _open_thread(db, thread: str | None):
+    from concierge import threads
+
+    t = _thread_target(thread)
+    return threads.find_or_create(db, job=t["job"], title=t["title"], pane=t["pane"], thread_id=t["thread_id"])
+
+
+@app.command("post")
+def post_cmd(
+    text: str,
+    thread: str = typer.Option(None, help="Thread id, or a title (a new title starts a thread)"),
+    urgency: str = typer.Option("needs", help="fyi | needs | urgent | critical"),
+    file: str = typer.Option(None, help="A file to push and link, relative to your cwd"),
+):
+    """Say something in your thread in his app."""
+    from concierge import threads
+
+    if file:
+        text += "\n" + publish_and_link(file)
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        threads.post(db, th, text, urgency=urgency)
+    typer.echo(f"posted to thread {th['id']}")
+
+
+@app.command("ask")
+def ask_cmd(
+    question: str,
+    option: list[str] = typer.Option(..., "--option", help="Repeat for each choice"),
+    recommend: str = typer.Option(None, help="The option you'd pick"),
+    thread: str = typer.Option(None),
+    urgency: str = typer.Option("needs"),
+):
+    """A decision for him: buttons in the app. His tap comes back to you as a message."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend)
+    typer.echo(f"asked in thread {th['id']} (decision {mid}); his answer arrives as a message")
+
+
+@app.command("facts")
+def facts_cmd(
+    pairs: list[str] = typer.Argument(..., help='key=value, e.g. "Money=£400-450". Empty value removes it.'),
+    thread: str = typer.Option(None),
+):
+    """Update the key-facts card pinned at the top of your thread."""
+    from concierge import threads
+
+    facts = {}
+    for p in pairs:
+        if "=" not in p:
+            raise typer.BadParameter(f"not key=value: {p}")
+        k, v = p.split("=", 1)
+        facts[k.strip()] = v.strip()
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        typer.echo(json.dumps(threads.set_facts(db, th["id"], facts), ensure_ascii=False))
+
+
+@app.command("close")
+def close_cmd(thread: str = typer.Option(None), note: str = typer.Option(None, help="Last word, e.g. the outcome")):
+    """The thing is done: close the thread (it stays searchable)."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        if note:
+            threads.post(db, th, note, urgency="needs")
+        threads.close(db, th["id"])
+    typer.echo(f"closed thread {th['id']}")
+
+
+@app.command("rules")
+def rules_cmd(thread: str = typer.Option(None)):
+    """His global decision rules, and any delegation you may decide under."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        try:
+            tid = _open_thread(db, thread)["id"]
+        except (KeyError, typer.BadParameter):
+            tid = None
+        typer.echo(threads.rules_text(db, tid))
+
+
+@app.command("decided")
+def decided_cmd(
+    question: str,
+    choice: str,
+    rule: str = typer.Option(..., help="The rule in his spec you relied on"),
+    kind: str = typer.Option(None, help="The kind of decision, if the delegation names one"),
+    thread: str = typer.Option(None),
+):
+    """Record a decision you took for him under a delegation. Refused without one."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        try:
+            threads.decided(db, th, question, choice, rule=rule, kind=kind)
+        except (PermissionError, ValueError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
+    typer.echo(f"recorded in thread {th['id']}; he can undo it")
+
+
+@app.command("threads-tick")
+def threads_tick_cmd():
+    from concierge import threads
+
+    with threads.connect() as db:
+        typer.echo(threads.tick(db))

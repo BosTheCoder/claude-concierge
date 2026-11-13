@@ -115,6 +115,17 @@ class RemoteControl:
 
 
 @dataclass(frozen=True)
+class App:
+    """The threads app (threads.py). `base_url` is the tailnet HTTPS origin the phone
+    opens; `alarm_account` derives glance's alarm topic; `mirror_to_telegram` keeps
+    job messages going to Telegram too, until the app is trusted on its own."""
+
+    base_url: str = ""
+    alarm_account: str = ""
+    mirror_to_telegram: bool = True
+
+
+@dataclass(frozen=True)
 class Settings:
     repos: tuple[Repo, ...] = ()
     lanes: tuple[LaneSpec, ...] = ()
@@ -123,6 +134,7 @@ class Settings:
     remote_control: RemoteControl = field(default_factory=RemoteControl)
     telegram: Telegram = field(default_factory=Telegram)
     reaper: Reaper = field(default_factory=Reaper)
+    app: App = field(default_factory=App)
     source: Path | None = None
     is_example: bool = True
 
@@ -218,6 +230,7 @@ def load(path: Path | None = None) -> Settings:
     rc = raw.get("remote_control") or {}
     tg = raw.get("telegram") or {}
     reap = raw.get("reaper") or {}
+    ap = raw.get("app") or {}
     return Settings(
         repos=tuple(
             _parse_repo(row, i) for i, row in enumerate(raw.get("repos") or [])
@@ -247,6 +260,11 @@ def load(path: Path | None = None) -> Settings:
             waiting_nudge_hours=float(reap.get("waiting_nudge_hours", 24)),
             waiting_grace_hours=float(reap.get("waiting_grace_hours", 6)),
             enabled=bool(reap.get("enabled", True)),
+        ),
+        app=App(
+            base_url=str(ap.get("base_url") or "").rstrip("/"),
+            alarm_account=str(ap.get("alarm_account") or "").strip().lower(),
+            mirror_to_telegram=bool(ap.get("mirror_to_telegram", True)),
         ),
         source=source,
         is_example=is_example,
