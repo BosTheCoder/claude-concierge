@@ -29,6 +29,7 @@ first — it can kill processes.
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 import threading
@@ -343,7 +344,14 @@ def handler_for(sampler: Sampler):
             per poll every five seconds forever is not a log, it is a leak."""
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:
+            # The tasks list is ~900 KB of JSON and ~240 KB gzipped: on a phone that's the wait.
+            zipped = len(body) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+            if zipped:
+                body = gzip.compress(body, compresslevel=5)
             self.send_response(status)
+            if zipped:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")

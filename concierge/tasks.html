@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Task Chats</title>
 <meta name="theme-color" content="#14161a">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" onload="typeof render === 'function' && openId && render()"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" onload="typeof render === 'function' && openId && render()"></script>
 <script src="search.js"></script>
 <style>
   :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1d21; --mute:#6b6f76; --line:#e6e3dd; --red:#d93025; --orange:#e8710a; --blue:#1a73e8; --chip:#efede8; color-scheme:light }
@@ -27,8 +27,11 @@
   main { max-width:720px; margin:0 auto; padding:4px 16px 48px }
   .msg { color:var(--mute); padding:12px 0; font-size:14px } .msg.bad { color:var(--red) }
   .t { background:var(--card); border:1px solid var(--line); border-radius:14px; margin:8px 0; overflow:hidden }
-  .t > button { all:unset; box-sizing:border-box; display:flex; gap:10px; width:100%; padding:12px 14px; cursor:pointer; align-items:flex-start }
-  .t > button:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
+  .head { display:flex; align-items:stretch }
+  .fold { all:unset; flex:none; padding:0 14px; color:var(--mute); font-size:14px; cursor:pointer; display:flex; align-items:center; gap:4px }
+  .fold:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
+  .head > button[data-toggle] { all:unset; box-sizing:border-box; display:flex; gap:10px; flex:1; min-width:0; padding:12px 14px; cursor:pointer; align-items:flex-start }
+  .head > button[data-toggle]:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
   .t.sub { margin-left:20px }
   .p { flex:none; width:4px; align-self:stretch; border-radius:2px; background:var(--line) }
   .p5 { background:var(--red) } .p3 { background:var(--orange) } .p1 { background:var(--blue) }
@@ -57,7 +60,7 @@
   .chip[aria-pressed=true].p5, .chip[aria-pressed=true].p3, .chip[aria-pressed=true].p1 { color:var(--bg) }
   input[type=date] { min-height:40px; border:1px solid var(--line); border-radius:20px; background:var(--bg); color:inherit; font:inherit; font-size:15px; padding:0 10px }
   .flash { background:var(--chip); border-radius:12px; padding:10px 14px; margin:8px 0; font-size:14px }
-  .subs { margin:8px 0; padding-left:20px; font-size:14px }
+  .t.sub2 { margin-left:40px } .t.sub3 { margin-left:60px }
   textarea { width:100%; min-height:72px; border:1px solid var(--line); border-radius:12px; background:var(--bg);
     color:inherit; font:inherit; padding:10px 12px; resize:vertical }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px }
@@ -93,6 +96,7 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&
 const store = {get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} }};
 let views = {}, all = [], byId = {}, chats = {}, view = store.get("tc-view") || "today", openId = null, polling = null, linked = null;
+let unfolded = new Set();  // tasks whose subtasks are showing; folded by default
 let editing = null, busy = false, flash = "";  // editing = {id, text}: survives re-renders while he types
 
 async function api(path, body) {
@@ -129,17 +133,16 @@ function linkedId(text) { const m = text.match(/ticktick\.com\/\S*?tasks\/([0-9a
 function visible() {
   const q = $("#q").value.trim();
   const id = linkedId(q);
-  if (id) return byId[id] ? [byId[id]] : linked && linked.id === id ? [linked] : [];
-  if (q) return search(q).slice(0, 100);
-  if (view === "chats") return Object.entries(chats).map(([id, c]) => byId[id] || {id, title: c.title, closed: true});
-  // Like TickTick: a matching task brings its open subtasks with it, listed under it.
-  const hit = views[view] ? search(views[view]) : [], ids = new Set(hit.map(t => t.id)), out = [];
-  for (const t of hit.filter(t => !ids.has(t.parentId)).sort(byPriority)) {
-    out.push(t);
-    const kids = all.filter(x => x.parentId === t.id).sort(byPriority);
-    for (const k of kids) out.push({...k, sub: true});
-  }
-  return out;
+  if (id) return withKids(byId[id] ? [byId[id]] : linked && linked.id === id ? [linked] : []);
+  if (q) return withKids(search(q).slice(0, 100));
+  if (view === "chats") return withKids(Object.entries(chats).map(([id, c]) => byId[id] || {id, title: c.title, closed: true}));
+  // Like TickTick: a subtask of a matching task sits under it (unfold the task to see it), not on its own.
+  const hit = views[view] ? search(views[view]) : [], ids = new Set(hit.map(t => t.id));
+  return withKids(hit.filter(t => !ids.has(t.parentId)).sort(byPriority));
+}
+const kidsOf = id => all.filter(x => x.parentId === id).sort(byPriority);
+function withKids(list, depth = 0) {  // each task, then its subtasks if he unfolded it
+  return list.flatMap(t => [depth ? {...t, sub: depth} : t, ...(unfolded.has(t.id) && depth < 3 ? withKids(kidsOf(t.id), depth + 1) : [])]);
 }
 
 function action(t) {
@@ -207,26 +210,35 @@ function render() {
     $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${why}</p>`; return;
   }
   $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${head}</p>` + shown.map(t => {
-    const c = chats[t.id], subs = all.filter(x => x.parentId === t.id).map(x => x.title);
+    const c = chats[t.id], kids = kidsOf(t.id).length, folded = !unfolded.has(t.id);
     const meta = [dueText(t), esc(t.list), t.closed ? "done or deleted" : ""].filter(Boolean).join(" · ");
     const tt = t.projectId ? `<a class="link" href="https://ticktick.com/webapp/#p/${esc(t.projectId)}/tasks/${esc(t.id)}" target="_blank" rel="noopener">TickTick ›</a>` : "";
-    return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" : ""}">
-      <button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
-        <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>
+    const fold = kids ? `<button class="fold" data-fold="${esc(t.id)}" aria-expanded="${!folded}"
+        aria-label="${folded ? "Show" : "Hide"} ${kids} subtask${kids === 1 ? "" : "s"}">${kids} ${folded ? "▸" : "▾"}</button>` : "";
+    return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" + (t.sub > 1 ? " sub" + t.sub : "") : ""}">
+      <div class="head"><button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
+        <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>${fold}</div>
       <div class="body">${openId === t.id ? notes(t) : ""}
-        ${subs.length ? `<ul class="subs">${subs.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
         ${openId === t.id ? controls(t) : ""}
         <div class="row">${action(t)}</div><div class="row">${tt}</div></div></div>`;
   }).join("");
 }
 
+function apply(r, c) {
+  views = r.views || {}; all = (r.tasks || []).map(t => ({...t, day: dueDay(t), modified: stamp(t.modifiedTime), created: stamp(t.createdTime)})); byId = Object.fromEntries(all.map(t => [t.id, t])); chats = c.chats || {};
+}
 async function load(fresh) {
   try {
     const [r, c] = await Promise.all([api("api/tt/all" + (fresh ? "?fresh=1" : "")), api("api/tt/chats")]);
-    views = r.views || {}; all = (r.tasks || []).map(t => ({...t, day: dueDay(t), modified: stamp(t.modifiedTime), created: stamp(t.createdTime)})); byId = Object.fromEntries(all.map(t => [t.id, t])); chats = c.chats || {};
-    render();
+    if (editing || busy) return;  // never yank the page from under him; the next load catches up
+    apply(r, c); render();
+    store.set("tc-last", JSON.stringify({r, c}));
     if (r.error) $("#out").insertAdjacentHTML("afterbegin", `<p class="msg bad">Showing an older copy: ${esc(r.error)}</p>`);
-  } catch (e) { $("#out").innerHTML = `<p class="msg bad">Couldn't load your tasks: ${esc(e.message)}</p>`; }
+  } catch (e) {
+    const msg = `Couldn't reach TickTick: ${esc(e.message)}`;
+    all.length ? $("#out").insertAdjacentHTML("afterbegin", `<p class="msg bad">${msg}. Showing your last copy.</p>`)
+               : $("#out").innerHTML = `<p class="msg bad">${msg}</p>`;
+  }
 }
 
 async function start(id) {
@@ -265,6 +277,8 @@ $("#q").oninput = () => {
 document.addEventListener("click", e => {
   const v = e.target.closest("[data-view]");
   if (v) { view = v.dataset.view; store.set("tc-view", view); $("#q").value = ""; openId = null; render(); return; }
+  const fo = e.target.closest("[data-fold]");
+  if (fo) { const id = fo.dataset.fold; unfolded.has(id) ? unfolded.delete(id) : unfolded.add(id); render(); return; }
   const tog = e.target.closest("[data-toggle]");
   if (tog) { openId = openId === tog.dataset.toggle ? null : tog.dataset.toggle; flash = ""; render(); return; }
   const ed = e.target.closest("[data-edit]");
@@ -294,6 +308,7 @@ document.addEventListener("change", e => {
   if (box && e.target.type === "date" && e.target.value) change(box.dataset.task, {day: e.target.value}, "Moved");
 });
 $("#reload").onclick = () => { $("#out").insertAdjacentHTML("afterbegin", `<p class="msg">Refreshing…</p>`); load(true).then(() => setTimeout(() => load(), 6000)); };
+try { const last = JSON.parse(store.get("tc-last")); if (last) { apply(last.r, last.c); render(); } } catch {}
 load();
 </script>
 </body>
