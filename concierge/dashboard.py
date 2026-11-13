@@ -287,6 +287,44 @@ def ticktick_get(route: str, query: dict) -> tuple[int, dict]:
         return 502, {"error": str(exc)}
 
 
+DAY = re.compile(r"^\d{4}-\d\d-\d\d$")
+
+
+def ticktick_update(headers, raw: bytes, *, writer=None) -> tuple[int, dict]:
+    """POST /api/tt/update {id, etag, content?, priority?, day?, status?} → the task as TickTick now has it."""
+    body = _read_post(headers, raw)
+    if isinstance(body, tuple):
+        return body
+    task_id, etag = body.get("id"), body.get("etag")
+    if not (isinstance(task_id, str) and TICKTICK_ID.match(task_id) and isinstance(etag, str)):
+        return 400, {"ok": False, "error": "need a task id and its etag"}
+    changes = {}
+    if "content" in body:
+        if not isinstance(body["content"], str) or len(body["content"]) > 50_000:
+            return 400, {"ok": False, "error": "content must be text"}
+        changes["content"] = body["content"]
+    if "priority" in body:
+        if body["priority"] not in (0, 1, 3, 5):
+            return 400, {"ok": False, "error": "priority is 0, 1, 3 or 5"}
+        changes["priority"] = body["priority"]
+    if "day" in body:
+        if body["day"] is not None and not (isinstance(body["day"], str) and DAY.match(body["day"])):
+            return 400, {"ok": False, "error": "day is YYYY-MM-DD or null"}
+        changes["day"] = body["day"]
+    if "status" in body:
+        if body["status"] not in (2, -1):
+            return 400, {"ok": False, "error": "status is 2 (done) or -1 (won't do)"}
+        changes["status"] = body["status"]
+    if not changes:
+        return 400, {"ok": False, "error": "nothing to change"}
+    try:
+        return 200, {"ok": True, "task": (writer or ticktick.update)(task_id, etag, changes)}
+    except ticktick.Conflict as exc:
+        return 409, {"ok": False, "error": str(exc), "task": exc.task}
+    except Exception as exc:  # noqa: BLE001 - expired login, rate limit: say so on the page
+        return 502, {"ok": False, "error": str(exc)}
+
+
 def recent_jobs(hours: int = 24, *, load=None) -> list[dict]:
     """What the page's tray lists: jobs opened in the last day, newest first."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
@@ -350,7 +388,7 @@ def handler_for(sampler: Sampler):
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
-            if self._route() == "/api/task-chat":
+            if self._route() in ("/api/task-chat", "/api/tt/update"):
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:
@@ -358,7 +396,8 @@ def handler_for(sampler: Sampler):
                 if not 0 <= length <= MAX_BODY:
                     self._json(400, {"ok": False, "error": "bad body length"})
                     return
-                self._json(*task_chat_request(self.headers, self.rfile.read(length)))
+                handle = task_chat_request if self._route() == "/api/task-chat" else ticktick_update
+                self._json(*handle(self.headers, self.rfile.read(length)))
                 return
             if self._route() == "/api/spawn":
                 try:

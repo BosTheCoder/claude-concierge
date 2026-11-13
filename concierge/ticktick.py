@@ -12,7 +12,9 @@ import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from concierge import registry
 
@@ -46,11 +48,12 @@ def call(name: str, arguments: dict):
 CACHE_SECONDS = 600
 _cache: dict = {"at": 0.0, "tasks": []}
 _lock = threading.Lock()
-KEEP = ("id", "projectId", "title", "dueDate", "isAllDay", "timeZone", "priority", "tags", "parentId", "kind")
+KEEP = ("id", "projectId", "title", "dueDate", "isAllDay", "timeZone", "priority", "tags", "parentId", "kind",
+        "etag", "repeatFlag", "status")
 
 
 def _slim(t: dict, project: dict) -> dict:
-    body = (t.get("content") or t.get("desc") or "")[:800]
+    body = t.get("content") or t.get("desc") or ""
     items = [i.get("title") or "" for i in t.get("items") or []]
     return {k: t.get(k) for k in KEEP} | {"content": body, "items": items,
                                           "list": project["name"], "groupId": project.get("groupId")}
@@ -139,3 +142,64 @@ def one(task_id: str) -> dict:
     t = call("get_task_by_id", {"task_id": task_id})
     t = t.get("result", t)
     return _slim(t, {"name": "", "groupId": None}) | {"status": t.get("status")}
+
+
+class Conflict(Exception):
+    """The task changed in TickTick since the page loaded it. Carries the task as it is now."""
+
+    def __init__(self, msg: str, task: dict):
+        super().__init__(msg)
+        self.task = task
+
+
+def _dates(cur: dict, day: str | None) -> dict:
+    """Move a task to `day` (YYYY-MM-DD) or clear its date. Keeps the time of a timed task and the
+    length of a span; a task with no date becomes all-day."""
+    if day is None:
+        return {"startDate": None, "dueDate": None}
+    tz = ZoneInfo(cur.get("timeZone") or "Europe/London")
+    target = date.fromisoformat(day)
+    if not cur.get("dueDate"):
+        new = datetime.combine(target, datetime.min.time(), tz)
+        return {"startDate": new.isoformat(), "dueDate": new.isoformat(), "isAllDay": True, "timeZone": tz.key}
+    due = datetime.fromisoformat(cur["dueDate"]).astimezone(tz)
+    shift = timedelta(days=(target - due.date()).days)
+    out = {"dueDate": (due + shift).isoformat()}
+    if cur.get("startDate"):
+        out["startDate"] = (datetime.fromisoformat(cur["startDate"]).astimezone(tz) + shift).isoformat()
+    return out
+
+
+def update(task_id: str, etag: str, changes: dict) -> dict:
+    """Write the page's edits: content, priority, day (date or None), status (2 done, -1 won't do).
+    Refuses if the task changed in TickTick since the page read it, the way Tickfind does.
+    Returns the task as TickTick now has it; the cache follows."""
+    cur = call("get_task_by_id", {"task_id": task_id})
+    cur = cur.get("result", cur)
+    project = {"name": "", "groupId": None}
+    old = next((t for t in _cache["tasks"] if t["id"] == task_id), None)
+    if old:
+        project = {"name": old["list"], "groupId": old["groupId"]}
+    if cur.get("status"):
+        raise Conflict("It's already done or won't-do in TickTick.", _slim(cur, project))
+    if etag != cur.get("etag"):
+        raise Conflict("It changed in TickTick since this page loaded it. This is the latest; try again.",
+                       _slim(cur, project))
+    body = {"id": task_id, "projectId": cur["projectId"]}
+    if "content" in changes:
+        body["desc" if cur.get("kind") == "CHECKLIST" else "content"] = changes["content"]
+    if "priority" in changes:
+        body["priority"] = changes["priority"]
+    if "day" in changes:
+        body |= _dates(cur, changes["day"])
+    if changes.get("status") == -1:
+        body["status"] = -1
+    if len(body) > 2:
+        call("update_task", {"task_id": task_id, "task": body})
+    if changes.get("status") == 2:  # complete_task, not status=2: a repeating task moves to its next date
+        call("complete_task", {"project_id": cur["projectId"], "task_id": task_id})
+    now = call("get_task_by_id", {"task_id": task_id})
+    now = _slim(now.get("result", now), project)
+    # ponytail: a background refresh already in flight can put the old copy back until the next one
+    _cache["tasks"] = [t for t in _cache["tasks"] if t["id"] != task_id] + ([] if now["status"] else [now])
+    return now

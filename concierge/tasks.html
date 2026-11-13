@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Task Chats</title>
 <meta name="theme-color" content="#14161a">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <style>
   :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1d21; --mute:#6b6f76; --line:#e6e3dd; --red:#d93025; --orange:#e8710a; --blue:#1a73e8; --chip:#efede8; color-scheme:light }
   @media (prefers-color-scheme: dark) {
@@ -35,7 +37,25 @@
   .dot { flex:none; font-size:13px; font-weight:700; color:var(--blue); padding-top:2px }
   .body { display:none; padding:0 14px 14px; border-top:1px solid var(--line) }
   .t.open .body { display:block }
-  .content { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; color:var(--mute); max-height:40vh; overflow:auto; margin:10px 0 }
+  .content { overflow-wrap:anywhere; font-size:15px; max-height:50vh; overflow:auto; margin:10px 0 }
+  .content.raw { white-space:pre-wrap }
+  .content :first-child { margin-top:0 } .content :last-child { margin-bottom:0 }
+  .content h1, .content h2, .content h3 { font-size:16px; margin:12px 0 4px }
+  .content p, .content ul, .content ol { margin:6px 0 } .content ul, .content ol { padding-left:22px }
+  .content a { color:var(--blue) } .content code { background:var(--chip); padding:0 4px; border-radius:4px; font-size:13px }
+  .content pre { background:var(--chip); padding:8px; border-radius:8px; overflow:auto }
+  .content blockquote { margin:6px 0; padding-left:10px; border-left:3px solid var(--line); color:var(--mute) }
+  .content img { max-width:100% } .content table { border-collapse:collapse } .content td, .content th { border:1px solid var(--line); padding:2px 6px }
+  textarea.edit { min-height:40vh; font:14px/1.45 ui-monospace, monospace }
+  .ctl { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px }
+  .ctl .lbl { font-size:13px; color:var(--mute); width:100% }
+  .chip { min-height:40px; padding:0 14px; border-radius:20px; border:1px solid var(--line); background:var(--bg); color:inherit; font:inherit; font-size:15px; cursor:pointer }
+  .chip[aria-pressed=true] { background:var(--ink); color:var(--bg); border-color:var(--ink) }
+  .chip:disabled { opacity:.5 }
+  .chip.p5 { color:var(--red) } .chip.p3 { color:var(--orange) } .chip.p1 { color:var(--blue) }
+  .chip[aria-pressed=true].p5, .chip[aria-pressed=true].p3, .chip[aria-pressed=true].p1 { color:var(--bg) }
+  input[type=date] { min-height:40px; border:1px solid var(--line); border-radius:20px; background:var(--bg); color:inherit; font:inherit; font-size:15px; padding:0 10px }
+  .flash { background:var(--chip); border-radius:12px; padding:10px 14px; margin:8px 0; font-size:14px }
   .subs { margin:8px 0; padding-left:20px; font-size:14px }
   textarea { width:100%; min-height:72px; border:1px solid var(--line); border-radius:12px; background:var(--bg);
     color:inherit; font:inherit; padding:10px 12px; resize:vertical }
@@ -72,6 +92,7 @@ const store = {get: k => { try { return localStorage.getItem(k); } catch { retur
                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} }};
 const GCAL_GROUP = "69bb49317fd79e0002000a9c";  // Daily Schedule + Events (GCAL): his Today filter leaves them out
 let all = [], byId = {}, chats = {}, view = store.get("tc-view") || "today", openId = null, polling = null, linked = null;
+let editing = null, busy = false, flash = "";  // editing = {id, text}: survives re-renders while he types
 
 async function api(path, body) {
   const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
@@ -169,6 +190,51 @@ function action(t) {
     <div class="row"><button class="btn" data-start="${esc(t.id)}">Start chat</button><span class="status" id="st-${esc(t.id)}"></span></div>`;
 }
 
+// --- the task itself: notes as Markdown, and the triage controls ---
+function md(text) {
+  if (!window.marked || !window.DOMPurify) return `<div class="content raw">${esc(text)}</div>`;  // CDN down: plain text
+  const html = DOMPurify.sanitize(marked.parse(text, {gfm: true, breaks: true}));
+  return `<div class="content">${html.replace(/<a /g, '<a target="_blank" rel="noopener" ')}</div>`;
+}
+function notes(t) {
+  if (editing && editing.id === t.id) return `<textarea class="edit" id="edit-${esc(t.id)}" aria-label="Notes (Markdown)">${esc(editing.text)}</textarea>
+    <div class="row"><button class="btn" data-save="${esc(t.id)}">Save</button><button class="chip" data-unedit>Cancel</button></div>`;
+  return (t.content ? md(t.content) : "") + (t.closed || !t.etag ? "" : `<div class="row"><button class="chip" data-edit="${esc(t.id)}">✎ ${t.content ? "Edit notes" : "Add notes"}</button></div>`);
+}
+function controls(t) {
+  if (t.closed || !t.etag) return "";
+  const d = dueDay(t), dis = busy ? " disabled" : "", on = b => `aria-pressed="${b}"${dis}`;
+  const day = (label, v) => `<button class="chip" data-day="${v}" ${on(d === v)}>${label}</button>`;
+  const pri = (n, label) => `<button class="chip p${n}" data-pri="${n}" ${on((t.priority || 0) === n)}>${label}</button>`;
+  return `<div class="ctl" data-task="${esc(t.id)}"><span class="lbl">Due${t.repeatFlag ? " (repeats)" : ""}</span>
+      ${day("Today", today())}${day("Tomorrow", addDays(1))}${day("+1 week", addDays(7))}
+      <input type="date" value="${d || ""}" aria-label="Due date"${dis}>
+      <button class="chip" data-day="" ${on(!d)}>No date</button></div>
+    <div class="ctl" data-task="${esc(t.id)}"><span class="lbl">Priority</span>${pri(5, "High")}${pri(3, "Med")}${pri(1, "Low")}${pri(0, "None")}</div>
+    <div class="ctl" data-task="${esc(t.id)}"><button class="chip" data-status="2"${dis}>✓ Done</button>
+      <button class="chip" data-status="-1"${dis}>✕ Won't do</button><span class="status" id="ed-${esc(t.id)}"></span></div>`;
+}
+
+async function change(id, fields, msg) {
+  const t = byId[id] || linked; if (!t || busy) return;
+  busy = true; render();
+  const st = $(`#ed-${id}`); if (st) { st.className = "status"; st.textContent = "Saving…"; }
+  try {
+    const r = await api("api/tt/update", {id, etag: t.etag, ...fields});
+    put(r.task);
+    if (r.task.status) { flash = `${msg}: ${esc(r.task.title)}`; openId = null; }
+    if ("content" in fields) editing = null;
+  } catch (e) {
+    flash = `<span class="late">Not saved. ${esc(e.message)}</span>`;
+  }
+  busy = false; render();
+}
+function put(task) {  // the server's copy of a task replaces ours
+  all = all.filter(x => x.id !== task.id); delete byId[task.id];
+  if (!task.status) { all.push(task); byId[task.id] = task; }
+  if (linked && linked.id === task.id) linked = {...task, closed: !!task.status};
+}
+
 function render() {
   for (const b of document.querySelectorAll("[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === view && !$("#q").value.trim()));
   const shown = visible(), q = $("#q").value.trim();
@@ -176,17 +242,18 @@ function render() {
   if (!shown.length) {
     const why = linkedId(q) ? (linked === "loading" ? "Looking it up…" : "That task isn't open (or the link is wrong).")
       : q ? "Nothing matches." : view === "chats" ? "No task has a chat yet." : "Nothing here.";
-    $("#out").innerHTML = `<p class="msg">${why}</p>`; return;
+    $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${why}</p>`; return;
   }
-  $("#out").innerHTML = `<p class="msg">${head}</p>` + shown.map(t => {
+  $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${head}</p>` + shown.map(t => {
     const c = chats[t.id], subs = all.filter(x => x.parentId === t.id).map(x => x.title);
     const meta = [dueText(t), esc(t.list), t.closed ? "done or deleted" : ""].filter(Boolean).join(" · ");
     const tt = t.projectId ? `<a class="link" href="https://ticktick.com/webapp/#p/${esc(t.projectId)}/tasks/${esc(t.id)}" target="_blank" rel="noopener">TickTick ›</a>` : "";
     return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" : ""}">
       <button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
         <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>
-      <div class="body">${t.content ? `<div class="content">${esc(t.content)}</div>` : ""}
+      <div class="body">${openId === t.id ? notes(t) : ""}
         ${subs.length ? `<ul class="subs">${subs.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+        ${openId === t.id ? controls(t) : ""}
         <div class="row">${action(t)}</div><div class="row">${tt}</div></div></div>`;
   }).join("");
 }
@@ -237,13 +304,32 @@ document.addEventListener("click", e => {
   const v = e.target.closest("[data-view]");
   if (v) { view = v.dataset.view; store.set("tc-view", view); $("#q").value = ""; openId = null; render(); return; }
   const tog = e.target.closest("[data-toggle]");
-  if (tog) { openId = openId === tog.dataset.toggle ? null : tog.dataset.toggle; render(); return; }
+  if (tog) { openId = openId === tog.dataset.toggle ? null : tog.dataset.toggle; flash = ""; render(); return; }
+  const ed = e.target.closest("[data-edit]");
+  if (ed) { const t = byId[ed.dataset.edit] || linked; editing = {id: t.id, text: t.content || ""}; render(); $(`#edit-${t.id}`)?.focus(); return; }
+  if (e.target.closest("[data-unedit]")) { editing = null; render(); return; }
+  const sv = e.target.closest("[data-save]");
+  if (sv) { change(sv.dataset.save, {content: editing.text}, "Saved"); return; }
+  const box = e.target.closest("[data-task]");
+  if (box && !e.target.disabled) {
+    const id = box.dataset.task, b = e.target.closest("button");
+    if (b?.dataset.day !== undefined) change(id, {day: b.dataset.day || null}, "Moved");
+    else if (b?.dataset.pri !== undefined) change(id, {priority: +b.dataset.pri}, "Priority");
+    else if (b?.dataset.status === "2") change(id, {status: 2}, "Done");
+    else if (b?.dataset.status === "-1") change(id, {status: -1}, "Won't do");
+    if (b) return;
+  }
   const st = e.target.closest("[data-start]");
   if (st) { start(st.dataset.start); return; }
   const res = e.target.closest("[data-resume]");
   // The link opens straight away; this brings the session back if the concierge closed it.
   if (res) fetch("api/task-chat", {method: "POST", keepalive: true, headers: {"Content-Type": "application/json"},
     body: JSON.stringify({task_id: res.dataset.resume, list: "", note: ""})}).catch(() => {});
+});
+document.addEventListener("input", e => { if (editing && e.target.id === `edit-${editing.id}`) editing.text = e.target.value; });
+document.addEventListener("change", e => {
+  const box = e.target.closest("[data-task]");
+  if (box && e.target.type === "date" && e.target.value) change(box.dataset.task, {day: e.target.value}, "Moved");
 });
 $("#reload").onclick = () => { $("#out").insertAdjacentHTML("afterbegin", `<p class="msg">Refreshing…</p>`); load(true).then(() => setTimeout(() => load(), 6000)); };
 load();
