@@ -19,15 +19,21 @@ ROUTE = re.compile(r"^/api/threads/(\d+)(?:/(\w+))?$")
 LIMITS = {"text": 8000, "spec": 4000, "rules": 8000, "note": 2000}
 
 
-def manifest() -> str:
+def manifest(prefix: str = "") -> str:
+    """His one phone app. On the tailnet's main address (prefix /claude) its scope is the whole
+    address, so every productivity page there (Tasks, Brief, Money, Inbox) is a pane of it, joined by
+    appbar.js. Served bare on :18787 it is the older install, kept working until he moves."""
+    shortcuts = [{"name": "New thread", "url": f"{prefix}/app#new"}]
+    if prefix:  # long-press the icon: straight to a pane
+        shortcuts += [{"name": n, "url": u} for n, u in
+                      (("Tasks", "/claude/tasks"), ("Brief", "/brief/"), ("Money", "/money/"))]
     return json.dumps({
-        # Scope is the whole origin so the Morning Brief (proxied at /brief) opens inside the app.
-        "id": "/app", "name": "Concierge", "short_name": "Concierge", "start_url": "/app", "scope": "/",
+        "id": f"{prefix}/app", "name": "Concierge", "short_name": "Concierge", "start_url": f"{prefix}/app", "scope": "/",
         "display": "standalone", "background_color": "#0e1116", "theme_color": "#0e1116",
-        "icons": [{"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
-        "shortcuts": [{"name": "New thread", "url": "/app#new"}],
+        "icons": [{"src": f"{prefix}/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
+        "shortcuts": shortcuts,
         # The phone's share sheet: share text or a link to Concierge and it starts a thread.
-        "share_target": {"action": "/app", "method": "GET",
+        "share_target": {"action": f"{prefix}/app", "method": "GET",
                          "params": {"title": "title", "text": "text", "url": "url"}},
     })
 

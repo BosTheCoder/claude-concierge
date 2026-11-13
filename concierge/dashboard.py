@@ -253,13 +253,6 @@ def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
 
 # --- the tasks page: one chat per TickTick task -------------------------------------
 TASKS_HTML = Path(__file__).with_name("tasks.html")
-# Installable from the phone as its own app. Scope is the page alone, so the sessions dashboard
-# beside it (/claude/) keeps its own install.
-TASKS_MANIFEST = json.dumps({
-    "name": "Task chats", "short_name": "Tasks", "id": "/claude/tasks", "start_url": "/claude/tasks",
-    "scope": "/claude/tasks", "display": "standalone", "background_color": "#14161a", "theme_color": "#14161a",
-    "icons": [{"src": "/claude/tasks-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
-})
 TICKTICK_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
 
 
@@ -399,7 +392,11 @@ def handler_for(sampler: Sampler):
                 self._send(200, app_api.APP_HTML.read_bytes(), "text/html; charset=utf-8")
                 return
             if route == "/app/manifest.webmanifest":
-                self._send(200, app_api.manifest().encode(), "application/manifest+json")
+                # Tailscale strips /claude on the way in, so the address he used is in Host: the main
+                # one has no port (the one app); :18787 is the older install.
+                host = self.headers.get("Host") or ""
+                prefix = "" if ":" in host or host.startswith("127.") else CLAUDE_PREFIX
+                self._send(200, app_api.manifest(prefix).encode(), "application/manifest+json")
                 return
             if route.startswith(("/api/threads", "/api/alarms/", "/api/settings")):
                 self._json(*app_api.get(route, urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
@@ -410,11 +407,8 @@ def handler_for(sampler: Sampler):
             if self._route() == "/tasks":
                 self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
                 return
-            if self._route() == "/tasks.webmanifest":
-                self._send(200, TASKS_MANIFEST.encode(), "application/manifest+json")
-                return
-            if self._route() == "/tasks-icon-512.png":
-                self._send(200, TASKS_HTML.with_name("tasks-icon-512.png").read_bytes(), "image/png")
+            if self._route() == "/appbar.js":
+                self._send(200, TASKS_HTML.with_name("appbar.js").read_bytes(), "text/javascript; charset=utf-8")
                 return
             if self._route() == "/tasks-sw.js":
                 self._send(200, TASKS_HTML.with_name("tasks-sw.js").read_bytes(), "text/javascript; charset=utf-8")
@@ -440,7 +434,7 @@ def handler_for(sampler: Sampler):
             if self.path == "/manifest.webmanifest":
                 self._send(200, MANIFEST.encode(), "application/manifest+json")
                 return
-            if self.path == "/icon-512.png":
+            if self._route() == "/icon-512.png":
                 self._send(200, ICON.read_bytes(), "image/png")
                 return
             self._send(404, b"no", "text/plain")

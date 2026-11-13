@@ -25,7 +25,7 @@
   .cl-sheet .cl-cancel { border:1px solid var(--line, #8884); background:none; color:inherit }
   .cl-sheet .cl-go, .cl-sheet .cl-open { border:0; background:var(--blue, LinkText); color:var(--bg, Canvas) }
   .cl-sheet .cl-go:disabled { opacity:.5 }
-  .cl-tray { position:fixed; right:16px; bottom:16px; z-index:50; width:min(300px, calc(100vw - 32px));
+  .cl-tray { position:fixed; right:16px; bottom:calc(var(--appbar, 0px) + 16px); z-index:50; width:min(300px, calc(100vw - 32px));
     border:1px solid var(--line, #8884); border-radius:14px; background:var(--card, Canvas); color:var(--ink, CanvasText);
     font:14px/1.35 system-ui, sans-serif; color-scheme:light dark; box-shadow:0 6px 24px #0006; box-sizing:border-box }
   .cl-tray[hidden] { display:none }
