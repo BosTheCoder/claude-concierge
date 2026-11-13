@@ -84,6 +84,7 @@ in one cannot stop the concierge from starting:
   rather than at the next cron boundary.
 - **Scheduled jobs:** `concierge later <when> <title> <brief>` queues a brief; `ensure-up` spawns it as a normal job once it is due (UK time unless the time has an offset), reporting to the same chat. Fires once, never retried. Queue: `state/later.json`.
 - **Claude button:** any page on the tailnet host can start a job seeded with what it shows: load `/claude/claude.js`, call `claudeAsk({title, cwd, context})` from a ✦ button. Served by the dashboard; Tailscale Serve maps `/claude` to it. The `cwd` must be a repo in `concierge.toml`, opened in `claude` once so the folder is trusted. [Spec](docs/superpowers/specs/2026-10-30-claude-button-design.md).
+- **Task chats:** `/claude/tasks` lists his TickTick lists; each task gets one Claude Code chat. The first tap starts it (session id chosen up front, `--session-id`); later taps open the same claude.ai link and resume the session if the reaper closed it. The task → session map is `state/task-chats.json` (job rows are pruned after 7 days). TickTick is read with Claude Code's own TickTick login (`ticktick.py`), which has no refresh: when it expires the page says so; reconnect via /mcp.
 - **[dashboard](docs/dashboard.md):** the reaper only knows about jobs. This is
   a page listing *every* Claude process on the machine — hand-started sessions
   included — with what state each is in and a button to close the idle ones.

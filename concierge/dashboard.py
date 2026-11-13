@@ -33,13 +33,15 @@ import json
 import subprocess
 import threading
 import time
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from concierge import config, registry, sessions, settings as settings_mod, spawn, tmuxctl
+from concierge import config, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
 
 # Fast enough that a reap shows up on the next poll, slow enough that the
 # dashboard is not itself a load on the machine it exists to relieve. One poll
@@ -177,8 +179,8 @@ def job_brief(page: str, note: str, context: str) -> str:
     )
 
 
-def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple[int, dict]:
-    """POST /api/spawn → (status, payload). Never raises: a 500 says what broke."""
+def _read_post(headers, raw: bytes) -> tuple[int, dict] | dict:
+    """The body of a page's POST, or (status, error) to send back."""
     # A page on another site could otherwise start sessions through his browser.
     origin = headers.get("Origin")
     if (headers.get("Sec-Fetch-Site") or "") == "cross-site" or (origin and origin not in SPAWN_ORIGINS):
@@ -191,6 +193,14 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
         return 400, {"ok": False, "error": "body is not JSON"}
     if not isinstance(body, dict):
         return 400, {"ok": False, "error": "body must be an object"}
+    return body
+
+
+def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple[int, dict]:
+    """POST /api/spawn → (status, payload). Never raises: a 500 says what broke."""
+    body = _read_post(headers, raw)
+    if isinstance(body, tuple):
+        return body
     fields = {k: body.get(k) or "" for k in SPAWN_LIMITS}
     for k, v in fields.items():
         if not isinstance(v, str):
@@ -223,10 +233,11 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
 
 def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
     """After the reply: record the chat URL, or why it never came."""
-    url = (poller or spawn.poll_for_rc_url)(job_id)
+    url = poller(job_id) if poller else spawn.poll_for_rc_url(
+        job_id, session_id=(registry.load().get(job_id) or {}).get("claude_session_id"))
     with REGISTRY_LOCK:
         if url:
-            registry.upsert(job_id, rc_url=url, claude_session_id=spawn.session_id_from_url(url))
+            registry.upsert(job_id, rc_url=url)
         # A repo never opened interactively stops the job at Claude Code's trust prompt,
         # which a page can't answer.
         elif TRUST_PROMPT in tmuxctl.capture(config.TMUX_SESSION, job_id):
@@ -236,6 +247,44 @@ def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
         elif job_id not in tmuxctl.list_windows(config.TMUX_SESSION):
             registry.upsert(job_id, status="failed", error="the session closed on startup")
         # else: slow to print its URL. It is still in the Claude app as "[id] title".
+
+
+# --- the tasks page: one chat per TickTick task -------------------------------------
+TASKS_HTML = Path(__file__).with_name("tasks.html")
+TICKTICK_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
+
+
+def task_chat_request(headers, raw: bytes, *, opener=None, last_chat=None) -> tuple[int, dict]:
+    """POST /api/task-chat {task_id, list, note} → the task's own chat, started or resumed."""
+    body = _read_post(headers, raw)
+    if isinstance(body, tuple):
+        return body
+    task_id, list_name, note = (body.get(k) or "" for k in ("task_id", "list", "note"))
+    if not all(isinstance(v, str) for v in (task_id, list_name, note)) or not TICKTICK_ID.match(task_id):
+        return 400, {"ok": False, "error": "need a TickTick task id"}
+    chat = (last_chat or registry.last_chat)()
+    if not chat:
+        return 503, {"ok": False, "error": "the concierge has no Telegram chat yet; message it once"}
+    try:
+        with REGISTRY_LOCK:
+            got = (opener or taskchats.open_chat)(task_id, list_name[:200], note.strip()[:4000], chat)
+    except Exception as exc:  # noqa: BLE001 - report, never 500 silently
+        return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    if not got["rc_url"]:
+        threading.Thread(target=finish_start, args=(got["id"], "the task's repo"), daemon=True).start()
+    return 200, {"ok": True, **got}
+
+
+def ticktick_get(route: str, query: dict) -> tuple[int, dict]:
+    try:
+        if route == "/api/tt/lists":
+            return 200, {"lists": ticktick.lists()}
+        list_id = (query.get("list") or [""])[0]
+        if not TICKTICK_ID.match(list_id):
+            return 400, {"error": "bad list id"}
+        return 200, {"tasks": ticktick.open_tasks(list_id)}
+    except Exception as exc:  # noqa: BLE001 - expired login, TickTick down: say so on the page
+        return 502, {"error": str(exc)}
 
 
 def recent_jobs(hours: int = 24, *, load=None) -> list[dict]:
@@ -274,6 +323,15 @@ def handler_for(sampler: Sampler):
             if self._route() == "/claude.js":
                 self._send(200, CLAUDE_JS.read_bytes(), "text/javascript; charset=utf-8")
                 return
+            if self._route() == "/tasks":
+                self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
+                return
+            if self._route() in ("/api/tt/lists", "/api/tt/tasks"):
+                self._json(*ticktick_get(self._route(), urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
+                return
+            if self._route() == "/api/tt/chats":
+                self._json(200, {"chats": taskchats.chats()})
+                return
             if self._route() == "/api/jobs":
                 self._json(200, {"jobs": recent_jobs()})
                 return
@@ -292,6 +350,16 @@ def handler_for(sampler: Sampler):
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
+            if self._route() == "/api/task-chat":
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= MAX_BODY:
+                    self._json(400, {"ok": False, "error": "bad body length"})
+                    return
+                self._json(*task_chat_request(self.headers, self.rfile.read(length)))
+                return
             if self._route() == "/api/spawn":
                 try:
                     length = int(self.headers.get("Content-Length") or 0)

@@ -36,15 +36,6 @@ def test_claude_argv_uses_the_mode_flag_not_the_dangerous_one():
     assert "--dangerously-skip-permissions" not in argv
 
 
-def test_session_id_comes_from_the_last_path_segment():
-    assert spawn.session_id_from_url("https://claude.ai/code/session_01ABC") == \
-        "session_01ABC"
-
-
-def test_session_id_is_none_without_a_url():
-    assert spawn.session_id_from_url(None) is None
-
-
 def test_resolve_cwd_accepts_every_configured_repo():
     assert spawn.resolve_cwd(TASKS) == NOTES.path.resolve()
     assert spawn.resolve_cwd(NPM) == APP.path.resolve()
@@ -144,16 +135,24 @@ def test_spawn_job_stores_the_brief_and_session_id_for_a_respawn(tmp_path):
     )
     stored = registry.load(state)[job["id"]]
     assert stored["brief"] == "the original brief"
-    assert stored["claude_session_id"] == "session_abc"
 
 
-def test_spawn_job_stores_no_session_id_without_a_url(tmp_path):
-    state = tmp_path / "jobs.json"
-    job = spawn.spawn_job(
-        title="t", brief="b", cwd=TASKS, chat_id="1",
-        state_path=state, tmux=FakeTmux(), poller=lambda w: None,
-    )
-    assert registry.load(state)[job["id"]]["claude_session_id"] is None
+def test_a_closed_job_resumes_the_very_session_it_started(tmp_path, monkeypatch):
+    """The session id is chosen at spawn, not read off the RC URL (a different id)."""
+    monkeypatch.setattr(spawn.settings, "render_prompt", lambda name: Path("/p/job.md"))
+    state, tmux = tmp_path / "jobs.json", FakeTmux()
+    job = spawn.spawn_job(title="t", brief="b", cwd=TASKS, chat_id="1", ticktick_task_id="tt1",
+                          state_path=state, tmux=tmux, poller=lambda w: None)
+    sid = registry.load(state)[job["id"]]["claude_session_id"]
+    assert f"--session-id {sid}" in tmux.windows[0][2]
+
+    tmux.windows.clear()  # the reaper closed it
+    spawn.resume_job(job["id"], state_path=state, tmux=tmux)
+    assert tmux.windows[0][2].endswith(f"--resume {sid}")
+    assert registry.load(state)[job["id"]]["status"] == "running"
+
+    spawn.resume_job(job["id"], state_path=state, tmux=tmux)  # already open: no second window
+    assert len(tmux.windows) == 1
 
 
 def test_spawn_job_remembers_the_chat_for_supervisor_alerts(tmp_path):
@@ -217,3 +216,15 @@ def test_spawn_job_leaves_no_registry_entry_when_tmux_raises(tmp_path):
             state_path=state, tmux=ExplodingTmux(), poller=lambda w: None,
         )
     assert registry.load(state) == {}
+
+
+def test_the_chat_link_comes_from_the_sessions_own_transcript(tmp_path):
+    """The pane loses the URL; the transcript's last bridge_status line keeps it."""
+    (tmp_path / "-home-x").mkdir()
+    (tmp_path / "-home-x" / "sid1.jsonl").write_text(
+        '{"type":"user","message":"see https://claude.ai/code/session_FAKE"}\n'
+        '{"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01OLD"}\n'
+        'not json\n'
+        '{"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01NEW"}\n')
+    assert spawn.rc_url_from_transcript("sid1", tmp_path) == "https://claude.ai/code/session_01NEW"
+    assert spawn.rc_url_from_transcript("other", tmp_path) is None

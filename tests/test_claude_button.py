@@ -115,7 +115,7 @@ def tmux_fakes(monkeypatch):
 
 def test_finishing_a_start_records_the_chat_url(tmux_fakes):
     dashboard.finish_start("A8", "~/r", poller=lambda w: "https://claude.ai/code/session_x")
-    assert tmux_fakes["marked"] == [("A8", {"rc_url": "https://claude.ai/code/session_x", "claude_session_id": "session_x"})]
+    assert tmux_fakes["marked"] == [("A8", {"rc_url": "https://claude.ai/code/session_x"})]
 
 
 def test_a_job_stuck_on_the_trust_prompt_is_closed_and_marked_failed(tmux_fakes):
