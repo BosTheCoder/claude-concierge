@@ -73,7 +73,7 @@ def notify(
             with threads.connect() as db:
                 th = threads.find_or_create(db, job=f"session:{sid}", title=f"Session in {Path.cwd().name}")
                 threads.post(db, th, body, urgency="needs")
-        if config.SETTINGS.app.mirror_to_telegram or not config.SETTINGS.app.base_url:
+        if not (sid and config.SETTINGS.app.base_url):
             telegram.send(chat, body)
         return
 
@@ -87,7 +87,7 @@ def notify(
         body += "\n" + attach(job, file)
 
     to_thread(job_id, job, body, status)
-    if config.SETTINGS.app.mirror_to_telegram or not config.SETTINGS.app.base_url:
+    if not config.SETTINGS.app.base_url:  # no app: Telegram is the only place it can go
         telegram.send(
             job["chat_id"],
             body,

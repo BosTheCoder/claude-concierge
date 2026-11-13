@@ -161,7 +161,22 @@ def raise_alarm(db, level: str, title: str, body: str, open_url: str, *, sender=
         (sender or _post_ntfy)(alarm_topic(app.alarm_account), f"{app.base_url}/api/alarms/{aid}")
     except Exception as exc:  # noqa: BLE001 - the thread still shows it; say why it didn't ring
         db.execute("UPDATE alarms SET body = body || ? WHERE id=?", (f" (alert not sent: {exc})", aid))
+    if app.mirror_to_telegram and sender is None:
+        _mirror(level, title, body, open_url)
     return aid
+
+
+def _mirror(level: str, title: str, body: str, open_url: str) -> None:
+    """While the app is new, every alert also goes to Telegram. Never raises."""
+    from concierge import registry, telegram
+
+    try:
+        chat = registry.last_chat()
+        if chat:
+            mark = {"urgent": "⚠️ ", "critical": "🚨 "}.get(level, "")
+            telegram.send(chat, f"{mark}{title}\n{body[:600]}\n{open_url}")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def thread_url(thread_id: int) -> str:

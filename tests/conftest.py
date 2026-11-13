@@ -52,3 +52,16 @@ def no_real_threads_db(monkeypatch, tmp_path):
     from concierge import threads
 
     monkeypatch.setattr(threads, "DB_FILE", tmp_path / "threads.db")
+
+
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    """No test may reach Telegram or ntfy. On 2026-11-13 a threads test with no
+    sender injected sent two junk messages to Kelvin's real Concierge chat."""
+    from concierge import telegram, threads
+
+    def refuse(*_a, **_k):
+        raise AssertionError("test tried to reach the network; inject a sender/poster")
+
+    monkeypatch.setattr(telegram, "_urlopen", refuse)
+    monkeypatch.setattr(threads, "_post_ntfy", refuse)
