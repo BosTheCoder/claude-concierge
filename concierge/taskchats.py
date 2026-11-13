@@ -12,10 +12,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from concierge import config, registry, spawn, ticktick, tmuxctl
+from ticktick_core.rules import repo_for
 
-TASKS_REPO = "~/projects/personal/tasks"
-PROPERTY_REPO = "~/projects/personal/nyakundi-property-management"
+from concierge import config, registry, spawn, ticktick, tmuxctl
 
 
 def _path(state_path: Path | None) -> Path:
@@ -88,7 +87,7 @@ def open_chat(task_id: str, list_name: str, note: str, chat_id: str, *, state_pa
         return {"id": job["id"], "rc_url": entry.get("rc_url") or job.get("rc_url"), "started": False}
 
     task = (fetch or ticktick.call)("get_task_by_id", {"task_id": task_id})
-    cwd = PROPERTY_REPO if "Property Management" in list_name else TASKS_REPO
+    cwd = repo_for(list_name)  # his rules: property lists start in the property repo
     job = spawn.spawn_job(
         title=(task.get("title") or "TickTick task")[:120], brief=brief(task, list_name, note), cwd=cwd,
         chat_id=chat_id, ticktick_task_id=task_id, state_path=state_path, tmux=tmux, poller=lambda _w: None)

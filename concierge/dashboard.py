@@ -364,6 +364,9 @@ def handler_for(sampler: Sampler):
             if self._route() == "/tasks":
                 self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
                 return
+            if self._route() == "/search.js":
+                self._send(200, TASKS_HTML.with_name("search.js").read_bytes(), "text/javascript; charset=utf-8")
+                return
             if self._route() in ("/api/tt/all", "/api/tt/task"):
                 self._json(*ticktick_get(self._route(), urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
                 return

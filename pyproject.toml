@@ -4,7 +4,11 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "typer>=0.27.1",
+    "ticktick-core",
 ]
+
+[tool.uv.sources]
+ticktick-core = { path = "../ticktick-core", editable = true }
 
 [dependency-groups]
 dev = [

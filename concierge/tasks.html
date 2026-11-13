@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#14161a">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="search.js"></script>
 <style>
   :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1d21; --mute:#6b6f76; --line:#e6e3dd; --red:#d93025; --orange:#e8710a; --blue:#1a73e8; --chip:#efede8; color-scheme:light }
   @media (prefers-color-scheme: dark) {
@@ -78,8 +79,9 @@
     <button data-view="chats" aria-pressed="false">✦ Chats</button>
   </div>
   <details class="help"><summary>Search like Tickfind</summary>
-    Every word must match. <code>#tag</code> <code>~list</code> <code>-~list</code> <code>!high</code> <code>!med</code> <code>!low</code>
-    <code>due:today</code> <code>due:overdue</code> <code>due:week</code> <code>due:none</code> <code>-word</code> <code>"a phrase"</code></details>
+    Every word must match; one typo is forgiven if nothing matches exactly. <code>#tag</code> <code>~list</code> <code>-~list</code>
+    <code>!high</code> <code>!med</code> <code>!low</code> <code>due:today</code> <code>due:overdue</code> <code>due:week</code> <code>due:none</code>
+    <code>is:note</code> <code>-word</code> <code>"a phrase"</code> <code>a | b</code> (either) <code>sort:due</code> <code>sort:best</code></details>
 </header>
 <main id="out"><p class="msg">Loading your tasks…</p></main>
 <script>
@@ -90,8 +92,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const store = {get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} }};
-const GCAL_GROUP = "69bb49317fd79e0002000a9c";  // Daily Schedule + Events (GCAL): his Today filter leaves them out
-let all = [], byId = {}, chats = {}, view = store.get("tc-view") || "today", openId = null, polling = null, linked = null;
+let views = {}, all = [], byId = {}, chats = {}, view = store.get("tc-view") || "today", openId = null, polling = null, linked = null;
 let editing = null, busy = false, flash = "";  // editing = {id, text}: survives re-renders while he types
 
 async function api(path, body) {
@@ -117,51 +118,11 @@ function dueText(t) {
     : new Date(d + "T12:00").toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"});
   return late ? `<span class="late">${label}</span>` : label;
 }
-const hasTag = (t, ...names) => (t.tags || []).some(x => names.includes(x.toLowerCase()));
 const byPriority = (a, b) => (b.priority || 0) - (a.priority || 0) || (dueDay(a) || "9").localeCompare(dueDay(b) || "9");
-
-// His saved filters (read from TickTick 2026-11-13):
-// ✨Today = (due overdue or today, not in the GCAL group) or #today. Next = #next or #doing, as his Triage filter uses them.
-const VIEWS = {
-  today: t => (dueDay(t) && dueDay(t) <= today() && t.groupId !== GCAL_GROUP) || hasTag(t, "today"),
-  next: t => hasTag(t, "next", "doing"),
-  chats: t => !!chats[t.id],
-};
-
-// --- search, the Tickfind way: every word must match somewhere; title hits rank first ---
-const fold = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-const PRI = {high: 5, h: 5, medium: 3, med: 3, m: 3, low: 1, l: 1, none: 0, n: 0};
-function tokens(text) { return (text.match(/"[^"]*"|\S+/g) || []).map(w => w.replace(/"/g, "")).filter(Boolean); }
-function search(text) {
-  const q = {terms: [], not: [], tags: [], lists: [], notLists: [], pri: [], due: []};
-  for (const raw of tokens(text)) {
-    const w = fold(raw);
-    if (w.length > 1 && w[0] === "#") q.tags.push(w.slice(1));
-    else if (w.length > 2 && w.startsWith("-~")) q.notLists.push(w.slice(2));
-    else if (w.length > 1 && w[0] === "~") q.lists.push(w.slice(1));
-    else if (w[0] === "!" && w.slice(1) in PRI) q.pri.push(PRI[w.slice(1)]);
-    else if (w.startsWith("due:")) q.due.push(w.slice(4));
-    else if (w.length > 1 && w[0] === "-") q.not.push(w.slice(1));
-    else q.terms.push(w);
-  }
-  const t0 = today(), wk = addDays(7);
-  const dueOk = (t, k) => { const d = dueDay(t); return k === "none" ? !d : !d ? false : k === "today" ? d === t0
-    : k === "overdue" ? d < t0 : k === "tomorrow" ? d === addDays(1) : k === "week" ? d <= wk : k === "any"; };
-  const hits = [];
-  for (const t of all) {
-    const title = fold(t.title), tags = (t.tags || []).map(fold), list = fold(t.list), body = fold(t.content + "\n" + (t.items || []).join("\n"));
-    if (q.tags.some(g => !tags.some(x => x.includes(g)))) continue;
-    if (q.lists.some(l => !list.includes(l)) || q.notLists.some(l => list.includes(l))) continue;
-    if (q.pri.length && !q.pri.includes(t.priority || 0)) continue;
-    if (q.due.length && !q.due.some(k => dueOk(t, k))) continue;
-    const hay = [title, tags.join(" "), list, body].join("\n");
-    if (q.not.some(w => hay.includes(w))) continue;
-    let score = 0, ok = true;
-    for (const w of q.terms) { if (title.includes(w)) score += 3; else if (hay.includes(w)) score += 1; else { ok = false; break; } }
-    if (ok) hits.push([score, t]);
-  }
-  return hits.sort((a, b) => b[0] - a[0] || byPriority(a[1], b[1])).map(h => h[1]);
-}
+const stamp = s => s ? Date.parse(s.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) || 0 : 0;
+// Search and the Today / Next views are Tickfind's search (search.js, checked against tickfind/tests/search-cases.json);
+// the views' queries are his rules in ticktick-core (rules.toml), sent with the tasks.
+const search = (text, sort) => TickSearch.run(all, text, {today: today(), sort});
 
 // --- what is on screen ---
 function linkedId(text) { const m = text.match(/ticktick\.com\/\S*?tasks\/([0-9a-f]{24})/i); return m && m[1]; }
@@ -172,7 +133,7 @@ function visible() {
   if (q) return search(q).slice(0, 100);
   if (view === "chats") return Object.entries(chats).map(([id, c]) => byId[id] || {id, title: c.title, closed: true});
   // Like TickTick: a matching task brings its open subtasks with it, listed under it.
-  const hit = all.filter(VIEWS[view]), ids = new Set(hit.map(t => t.id)), out = [];
+  const hit = views[view] ? search(views[view]) : [], ids = new Set(hit.map(t => t.id)), out = [];
   for (const t of hit.filter(t => !ids.has(t.parentId)).sort(byPriority)) {
     out.push(t);
     const kids = all.filter(x => x.parentId === t.id).sort(byPriority);
@@ -230,6 +191,7 @@ async function change(id, fields, msg) {
   busy = false; render();
 }
 function put(task) {  // the server's copy of a task replaces ours
+  task = {...task, day: dueDay(task), modified: stamp(task.modifiedTime), created: stamp(task.createdTime)};
   all = all.filter(x => x.id !== task.id); delete byId[task.id];
   if (!task.status) { all.push(task); byId[task.id] = task; }
   if (linked && linked.id === task.id) linked = {...task, closed: !!task.status};
@@ -261,7 +223,7 @@ function render() {
 async function load(fresh) {
   try {
     const [r, c] = await Promise.all([api("api/tt/all" + (fresh ? "?fresh=1" : "")), api("api/tt/chats")]);
-    all = r.tasks || []; byId = Object.fromEntries(all.map(t => [t.id, t])); chats = c.chats || {};
+    views = r.views || {}; all = (r.tasks || []).map(t => ({...t, day: dueDay(t), modified: stamp(t.modifiedTime), created: stamp(t.createdTime)})); byId = Object.fromEntries(all.map(t => [t.id, t])); chats = c.chats || {};
     render();
     if (r.error) $("#out").insertAdjacentHTML("afterbegin", `<p class="msg bad">Showing an older copy: ${esc(r.error)}</p>`);
   } catch (e) { $("#out").innerHTML = `<p class="msg bad">Couldn't load your tasks: ${esc(e.message)}</p>`; }
