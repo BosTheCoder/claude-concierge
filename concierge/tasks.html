@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Task Chats</title>
 <meta name="theme-color" content="#14161a">
+<link rel="manifest" href="tasks.webmanifest">
+<link rel="icon" href="tasks-icon-512.png">
+<link rel="apple-touch-icon" href="tasks-icon-512.png">
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" onload="typeof render === 'function' && openId && render()"></script>
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" onload="typeof render === 'function' && openId && render()"></script>
 <script src="search.js"></script>
@@ -310,6 +313,7 @@ document.addEventListener("change", e => {
 $("#reload").onclick = () => { $("#out").insertAdjacentHTML("afterbegin", `<p class="msg">Refreshing…</p>`); load(true).then(() => setTimeout(() => load(), 6000)); };
 try { const last = JSON.parse(store.get("tc-last")); if (last) { apply(last.r, last.c); render(); } } catch {}
 load();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("tasks-sw.js", {scope: "tasks"}).catch(() => {});
 </script>
 </body>
 </html>

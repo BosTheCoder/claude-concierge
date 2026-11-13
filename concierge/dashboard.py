@@ -253,6 +253,13 @@ def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
 
 # --- the tasks page: one chat per TickTick task -------------------------------------
 TASKS_HTML = Path(__file__).with_name("tasks.html")
+# Installable from the phone as its own app. Scope is the page alone, so the sessions dashboard
+# beside it (/claude/) keeps its own install.
+TASKS_MANIFEST = json.dumps({
+    "name": "Task chats", "short_name": "Tasks", "id": "/claude/tasks", "start_url": "/claude/tasks",
+    "scope": "/claude/tasks", "display": "standalone", "background_color": "#14161a", "theme_color": "#14161a",
+    "icons": [{"src": "/claude/tasks-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+})
 TICKTICK_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
 
 
@@ -402,6 +409,15 @@ def handler_for(sampler: Sampler):
                 return
             if self._route() == "/tasks":
                 self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
+                return
+            if self._route() == "/tasks.webmanifest":
+                self._send(200, TASKS_MANIFEST.encode(), "application/manifest+json")
+                return
+            if self._route() == "/tasks-icon-512.png":
+                self._send(200, TASKS_HTML.with_name("tasks-icon-512.png").read_bytes(), "image/png")
+                return
+            if self._route() == "/tasks-sw.js":
+                self._send(200, TASKS_HTML.with_name("tasks-sw.js").read_bytes(), "text/javascript; charset=utf-8")
                 return
             if self._route() == "/search.js":
                 self._send(200, TASKS_HTML.with_name("search.js").read_bytes(), "text/javascript; charset=utf-8")
