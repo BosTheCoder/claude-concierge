@@ -40,6 +40,7 @@ its brief after a reboot killed it mid-flight.
 | `dashboard.py` | Serves that as a page, and keeps itself and its tailnet proxy up |
 | `messages.py` | The log of every message in and out, and `context`/`recent` over it |
 | `plugin_patch.py` | Re-applies the reply-context patch to the Telegram plugin after updates |
+| `threads.py`, `app_api.py`, `app.html` | The Concierge app: threads, decisions, alerts via glance (docs/threads.md) |
 
 `prompts/concierge.md` and `prompts/job.md` are the two system prompts. They're
 templates: `{{REPO_ROUTING}}` and `{{CONCIERGE_BIN}}` are substituted from
