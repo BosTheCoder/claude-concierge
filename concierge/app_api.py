@@ -21,7 +21,8 @@ LIMITS = {"text": 8000, "spec": 4000, "rules": 8000, "note": 2000}
 
 def manifest() -> str:
     return json.dumps({
-        "name": "Concierge", "short_name": "Concierge", "start_url": "/app", "scope": "/app",
+        # Scope is the whole origin so the Morning Brief (proxied at /brief) opens inside the app.
+        "id": "/app", "name": "Concierge", "short_name": "Concierge", "start_url": "/app", "scope": "/",
         "display": "standalone", "background_color": "#0e1116", "theme_color": "#0e1116",
         "icons": [{"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
         "shortcuts": [{"name": "New thread", "url": "/app#new"}],

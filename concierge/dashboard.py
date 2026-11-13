@@ -156,6 +156,7 @@ class Sampler:
 # Spec: docs/superpowers/specs/2026-10-30-claude-button-design.md
 
 CLAUDE_PREFIX = "/claude"
+BRIEF_UPSTREAM = "http://127.0.0.1:8804"  # inbox-brief's server.py
 CLAUDE_JS = Path(__file__).with_name("claude.js")
 TRUST_PROMPT = "Is this a project you created or one you trust"
 # Browsers send Origin on every POST. Checking it (not just Sec-Fetch-Site) also stops DNS
@@ -365,7 +366,27 @@ def handler_for(sampler: Sampler):
             path = self.path.split("?")[0]
             return path[len(CLAUDE_PREFIX):] if path.startswith(CLAUDE_PREFIX + "/") else path
 
+        def _proxy_brief(self) -> None:
+            """The Morning Brief, served from this origin so the Concierge app opens it inside
+            itself: an installed web app opens anything outside its own origin and scope in a
+            browser sheet with a URL bar. Passed through as-is to inbox-brief's server."""
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else None
+            req = urllib.request.Request(BRIEF_UPSTREAM + self.path, data=body, method=self.command,
+                                         headers={k: v for k, v in self.headers.items()
+                                                  if k.lower() in ("content-type", "accept", "cache-control")})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    self._send(r.status, r.read(), r.headers.get("Content-Type") or "application/octet-stream")
+            except urllib.error.HTTPError as e:
+                self._send(e.code, e.read(), e.headers.get("Content-Type") or "text/plain")
+            except OSError as e:
+                self._send(502, f"brief unreachable: {e}".encode(), "text/plain")
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
+            if self.path.startswith("/brief"):
+                self._proxy_brief()
+                return
             route = self._route()
             if route in ("/app", "/app/"):
                 self._send(200, app_api.APP_HTML.read_bytes(), "text/html; charset=utf-8")
@@ -409,6 +430,9 @@ def handler_for(sampler: Sampler):
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
+            if self.path.startswith("/brief"):
+                self._proxy_brief()
+                return
             if self._route().startswith(("/api/threads", "/api/settings", "/api/delegations")):
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
