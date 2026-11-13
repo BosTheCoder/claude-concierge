@@ -357,6 +357,16 @@ def test_a_broken_sweep_does_not_stop_the_concierge_coming_up(monkeypatch):
     assert cli.run_rc().startswith("rc-error:")
 
 
+def test_a_session_rc_failed_on_is_not_typed_into_again(tmp_path):
+    write_session(tmp_path / "sessions", 100)
+    run_sweep(tmp_path, FakeTmux(), pids=(100,))
+
+    tmux = FakeTmux()
+    run_sweep(tmp_path, tmux, pids=(100,))
+
+    assert tmux.sent == []
+
+
 def test_a_repeat_failure_inside_the_cooldown_stays_quiet(tmp_path):
     write_session(tmp_path / "sessions", 100)
 
@@ -371,11 +381,13 @@ def test_a_recovery_clears_the_cooldown_so_the_next_drop_alerts(tmp_path):
     write_session(tmp_path / "sessions", 100)
 
     run_sweep(tmp_path, FakeTmux(), pids=(100,))  # fails, alerts, sets cooldown
-    run_sweep(tmp_path, FakeTmux(), pids=(100,), reconnect_on_wait=(100,))
-
-    # Drop again; the cooldown must not swallow this one.
     path = tmp_path / "sessions" / "100.json"
     data = json.loads(path.read_text())
+    data["bridgeSessionId"] = "session_100"  # comes back (restart, or by itself)
+    path.write_text(json.dumps(data))
+    run_sweep(tmp_path, FakeTmux(), pids=(100,))
+
+    # Drop again; the cooldown must not swallow this one.
     data["bridgeSessionId"] = None
     path.write_text(json.dumps(data))
 

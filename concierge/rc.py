@@ -294,6 +294,10 @@ def sweep(
     notifier = notifier or (lambda msg: _default_notifier(msg, registry_path))
     state = load_state(state_path)
     alerts = state.setdefault("alerts", {})
+    # Sessions /rc already failed on. Typing it again every tick never helps (a
+    # stale login fails the same way each time) and each attempt is a new turn,
+    # which un-archives the chat in the Claude app. Keyed by pid, so a restart retries.
+    gave_up = set(state.get("gave_up", []))
 
     def alert(key: str, message: str, *, once: bool = False) -> None:
         """`once` for things only he can fix by hand.
@@ -323,7 +327,13 @@ def sweep(
         and not s.connected
         and s.pane not in connected_panes
         and s.age_seconds(now) >= MIN_AGE_SECONDS
+        and f"{s.name}:{s.pid}" not in gave_up
     ]
+    for s in live:  # one that came back by itself gets a fresh chance and a fresh alert
+        if s.connected and f"{s.name}:{s.pid}" in gave_up:
+            gave_up.discard(f"{s.name}:{s.pid}")
+            alerts.pop(f"{s.name}:{s.pid}", None)
+    state["gave_up"] = sorted(k for k in gave_up if k in {f"{s.name}:{s.pid}" for s in live})
     if not down:
         save_state(state, state_path)
         return "rc: all connected"
@@ -402,6 +412,7 @@ def sweep(
                     f"{session.name} has dropped off Remote Control and /rc "
                     f"didn't bring it back. Its window needs restarting.",
                 )
+                state["gave_up"].append(key)
                 outcomes.append(f"{session.name}: still down")
 
     save_state(state, state_path)
