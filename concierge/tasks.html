@@ -6,25 +6,32 @@
 <title>Task Chats</title>
 <meta name="theme-color" content="#14161a">
 <style>
-  :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1d21; --mute:#6b6f76; --line:#e6e3dd; --red:#d93025; --blue:#1a73e8; --chip:#efede8; color-scheme:light }
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1d21; --mute:#6b6f76; --line:#e6e3dd; --red:#d93025; --orange:#e8710a; --blue:#1a73e8; --chip:#efede8; color-scheme:light }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#14161a; --card:#1d2026; --ink:#eceae6; --mute:#9aa0a8; --line:#2c3038; --red:#ff6b5e; --blue:#8ab4f8; --chip:#272b32; color-scheme:dark }
+    :root { --bg:#14161a; --card:#1d2026; --ink:#eceae6; --mute:#9aa0a8; --line:#2c3038; --red:#ff6b5e; --orange:#ffa04d; --blue:#8ab4f8; --chip:#272b32; color-scheme:dark }
   }
   * { box-sizing:border-box }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui, -apple-system, sans-serif }
   header { position:sticky; top:0; z-index:5; background:var(--bg); padding:12px 16px 8px; border-bottom:1px solid var(--line) }
-  h1 { margin:0 0 8px; font-size:20px }
-  .bar { display:flex; gap:8px }
-  select, input[type=search] { min-height:44px; border:1px solid var(--line); border-radius:12px; background:var(--card);
-    color:inherit; font:inherit; padding:0 12px; min-width:0 }
-  select { flex:1 1 55% } input[type=search] { flex:1 1 45% }
-  main { max-width:720px; margin:0 auto; padding:8px 16px 48px }
-  .msg { color:var(--mute); padding:16px 0 } .msg.bad { color:var(--red) }
+  .top { display:flex; align-items:center; gap:8px; margin-bottom:8px }
+  h1 { margin:0; font-size:20px; flex:1 }
+  .icon { width:44px; height:44px; border-radius:22px; border:1px solid var(--line); background:var(--card); color:inherit; font-size:20px; cursor:pointer }
+  input[type=search] { width:100%; min-height:44px; border:1px solid var(--line); border-radius:12px; background:var(--card);
+    color:inherit; font:inherit; padding:0 12px }
+  .tabs { display:flex; gap:6px; margin-top:8px }
+  .tabs button { flex:1; min-height:40px; border-radius:20px; border:0; background:var(--chip); color:inherit; font:inherit; font-size:15px; cursor:pointer }
+  .tabs button[aria-pressed=true] { background:var(--blue); color:var(--bg); font-weight:600 }
+  main { max-width:720px; margin:0 auto; padding:4px 16px 48px }
+  .msg { color:var(--mute); padding:12px 0; font-size:14px } .msg.bad { color:var(--red) }
   .t { background:var(--card); border:1px solid var(--line); border-radius:14px; margin:8px 0; overflow:hidden }
   .t > button { all:unset; box-sizing:border-box; display:flex; gap:10px; width:100%; padding:12px 14px; cursor:pointer; align-items:flex-start }
   .t > button:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
+  .t.sub { margin-left:20px }
+  .p { flex:none; width:4px; align-self:stretch; border-radius:2px; background:var(--line) }
+  .p5 { background:var(--red) } .p3 { background:var(--orange) } .p1 { background:var(--blue) }
   .ti { flex:1; min-width:0; overflow-wrap:anywhere }
   .meta { display:block; font-size:13px; color:var(--mute); margin-top:2px }
+  .meta .late { color:var(--red) }
   .dot { flex:none; font-size:13px; font-weight:700; color:var(--blue); padding-top:2px }
   .body { display:none; padding:0 14px 14px; border-top:1px solid var(--line) }
   .t.open .body { display:block }
@@ -38,25 +45,33 @@
   .btn:disabled { opacity:.5 }
   .link { color:var(--blue); font-size:14px; text-decoration:none; padding:12px 4px }
   .status { font-size:14px; color:var(--mute) } .status.bad { color:var(--red) }
+  details.help { font-size:13px; color:var(--mute); margin-top:6px } details.help code { background:var(--chip); padding:0 4px; border-radius:4px }
 </style>
 </head>
 <body>
 <header>
-  <h1>Task chats</h1>
-  <div class="bar">
-    <select id="list" aria-label="TickTick list"><option value="chats">✦ With a chat</option></select>
-    <input id="q" type="search" placeholder="Filter" aria-label="Filter tasks">
+  <div class="top"><h1>Task chats</h1><button class="icon" id="reload" aria-label="Refresh from TickTick">↻</button></div>
+  <input id="q" type="search" placeholder="Search all tasks, or paste a TickTick link" aria-label="Search all tasks, or paste a TickTick link">
+  <div class="tabs" role="group" aria-label="View">
+    <button data-view="today" aria-pressed="true">Today</button>
+    <button data-view="next" aria-pressed="false">Next</button>
+    <button data-view="chats" aria-pressed="false">✦ Chats</button>
   </div>
+  <details class="help"><summary>Search like Tickfind</summary>
+    Every word must match. <code>#tag</code> <code>~list</code> <code>-~list</code> <code>!high</code> <code>!med</code> <code>!low</code>
+    <code>due:today</code> <code>due:overdue</code> <code>due:week</code> <code>due:none</code> <code>-word</code> <code>"a phrase"</code></details>
 </header>
-<main id="out"><p class="msg">Loading lists…</p></main>
+<main id="out"><p class="msg">Loading your tasks…</p></main>
 <script>
-// One Claude Code chat per TickTick task. The first tap starts it; every later tap opens the same
-// chat, resumed if the concierge closed it. Server: claude-concierge dashboard (taskchats.py).
+// One Claude Code chat per TickTick task. Today and Next mirror his TickTick filters; search mirrors Tickfind.
+// First tap starts the task's chat; later taps open the same chat, resumed if the concierge closed it.
+// Server: claude-concierge dashboard (taskchats.py, ticktick.py).
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const store = {get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} }};
-let lists = [], tasks = [], chats = {}, openId = null, polling = null;
+const GCAL_GROUP = "69bb49317fd79e0002000a9c";  // Daily Schedule + Events (GCAL): his Today filter leaves them out
+let all = [], byId = {}, chats = {}, view = store.get("tc-view") || "today", openId = null, polling = null, linked = null;
 
 async function api(path, body) {
   const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
@@ -64,71 +79,163 @@ async function api(path, body) {
   if (!r.ok || j.ok === false) throw new Error(j.error || `error ${r.status}`);
   return j;
 }
-const listName = id => (lists.find(l => l.id === id) || {}).name || "";
-const due = d => d ? new Date(d).toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"}) : "";
+
+// --- dates: an all-day task's date is in its own time zone, a timed one in the phone's ---
+const ymd = (d, tz) => new Intl.DateTimeFormat("en-CA", {timeZone: tz || undefined, year: "numeric", month: "2-digit", day: "2-digit"}).format(d);
+const today = () => ymd(new Date());
+const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
+function dueDay(t) {
+  if (!t.dueDate) return null;
+  const d = new Date(t.dueDate.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+  try { return ymd(d, t.isAllDay ? t.timeZone : undefined); } catch { return ymd(d); }
+}
+function dueText(t) {
+  const d = dueDay(t); if (!d) return "";
+  const late = d < today();
+  const label = d === today() ? "Today" : d === addDays(1) ? "Tomorrow"
+    : new Date(d + "T12:00").toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"});
+  return late ? `<span class="late">${label}</span>` : label;
+}
+const hasTag = (t, ...names) => (t.tags || []).some(x => names.includes(x.toLowerCase()));
+const byPriority = (a, b) => (b.priority || 0) - (a.priority || 0) || (dueDay(a) || "9").localeCompare(dueDay(b) || "9");
+
+// His saved filters (read from TickTick 2026-11-13):
+// ✨Today = (due overdue or today, not in the GCAL group) or #today. Next = #next or #doing, as his Triage filter uses them.
+const VIEWS = {
+  today: t => (dueDay(t) && dueDay(t) <= today() && t.groupId !== GCAL_GROUP) || hasTag(t, "today"),
+  next: t => hasTag(t, "next", "doing"),
+  chats: t => !!chats[t.id],
+};
+
+// --- search, the Tickfind way: every word must match somewhere; title hits rank first ---
+const fold = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const PRI = {high: 5, h: 5, medium: 3, med: 3, m: 3, low: 1, l: 1, none: 0, n: 0};
+function tokens(text) { return (text.match(/"[^"]*"|\S+/g) || []).map(w => w.replace(/"/g, "")).filter(Boolean); }
+function search(text) {
+  const q = {terms: [], not: [], tags: [], lists: [], notLists: [], pri: [], due: []};
+  for (const raw of tokens(text)) {
+    const w = fold(raw);
+    if (w.length > 1 && w[0] === "#") q.tags.push(w.slice(1));
+    else if (w.length > 2 && w.startsWith("-~")) q.notLists.push(w.slice(2));
+    else if (w.length > 1 && w[0] === "~") q.lists.push(w.slice(1));
+    else if (w[0] === "!" && w.slice(1) in PRI) q.pri.push(PRI[w.slice(1)]);
+    else if (w.startsWith("due:")) q.due.push(w.slice(4));
+    else if (w.length > 1 && w[0] === "-") q.not.push(w.slice(1));
+    else q.terms.push(w);
+  }
+  const t0 = today(), wk = addDays(7);
+  const dueOk = (t, k) => { const d = dueDay(t); return k === "none" ? !d : !d ? false : k === "today" ? d === t0
+    : k === "overdue" ? d < t0 : k === "tomorrow" ? d === addDays(1) : k === "week" ? d <= wk : k === "any"; };
+  const hits = [];
+  for (const t of all) {
+    const title = fold(t.title), tags = (t.tags || []).map(fold), list = fold(t.list), body = fold(t.content + "\n" + (t.items || []).join("\n"));
+    if (q.tags.some(g => !tags.some(x => x.includes(g)))) continue;
+    if (q.lists.some(l => !list.includes(l)) || q.notLists.some(l => list.includes(l))) continue;
+    if (q.pri.length && !q.pri.includes(t.priority || 0)) continue;
+    if (q.due.length && !q.due.some(k => dueOk(t, k))) continue;
+    const hay = [title, tags.join(" "), list, body].join("\n");
+    if (q.not.some(w => hay.includes(w))) continue;
+    let score = 0, ok = true;
+    for (const w of q.terms) { if (title.includes(w)) score += 3; else if (hay.includes(w)) score += 1; else { ok = false; break; } }
+    if (ok) hits.push([score, t]);
+  }
+  return hits.sort((a, b) => b[0] - a[0] || byPriority(a[1], b[1])).map(h => h[1]);
+}
+
+// --- what is on screen ---
+function linkedId(text) { const m = text.match(/ticktick\.com\/\S*?tasks\/([0-9a-f]{24})/i); return m && m[1]; }
+function visible() {
+  const q = $("#q").value.trim();
+  const id = linkedId(q);
+  if (id) return byId[id] ? [byId[id]] : linked && linked.id === id ? [linked] : [];
+  if (q) return search(q).slice(0, 100);
+  if (view === "chats") return Object.entries(chats).map(([id, c]) => byId[id] || {id, title: c.title, closed: true});
+  // Like TickTick: a matching task brings its open subtasks with it, listed under it.
+  const hit = all.filter(VIEWS[view]), ids = new Set(hit.map(t => t.id)), out = [];
+  for (const t of hit.filter(t => !ids.has(t.parentId)).sort(byPriority)) {
+    out.push(t);
+    const kids = all.filter(x => x.parentId === t.id).sort(byPriority);
+    for (const k of kids) out.push({...k, sub: true});
+  }
+  return out;
+}
 
 function action(t) {
   const c = chats[t.id];
   if (c && c.rc_url) return `<a class="btn" href="${esc(c.rc_url)}" target="_blank" rel="noopener" data-resume="${esc(t.id)}">Open chat ›</a>
-    <span class="status">${c.live ? "running" : "will resume as you open it"}</span>`;
+    <span class="status">${c.live ? "running" : "resumes as you open it"}</span>`;
   if (c) return `<button class="btn" data-start="${esc(t.id)}">Reopen chat</button><span class="status" id="st-${esc(t.id)}">Starting…</span>`;
   return `<textarea id="note-${esc(t.id)}" placeholder="What should it do? (optional)" aria-label="Note for Claude"></textarea>
     <div class="row"><button class="btn" data-start="${esc(t.id)}">Start chat</button><span class="status" id="st-${esc(t.id)}"></span></div>`;
 }
 
 function render() {
-  const q = $("#q").value.trim().toLowerCase();
-  const shown = tasks.filter(t => !q || (t.title + " " + (t.content || "")).toLowerCase().includes(q));
-  if (!shown.length) { $("#out").innerHTML = `<p class="msg">${$("#list").value === "chats" ? "No task has a chat yet. Pick a list and start one." : "Nothing open here."}</p>`; return; }
-  $("#out").innerHTML = shown.map(t => {
-    const c = chats[t.id];
-    const meta = [due(t.dueDate), t.subtasks?.length ? `${t.subtasks.length} subtasks` : "", t.list].filter(Boolean).join(" · ");
+  for (const b of document.querySelectorAll("[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === view && !$("#q").value.trim()));
+  const shown = visible(), q = $("#q").value.trim();
+  const head = q ? `${shown.length}${shown.length === 100 ? "+" : ""} found` : `${shown.length} task${shown.length === 1 ? "" : "s"}`;
+  if (!shown.length) {
+    const why = linkedId(q) ? (linked === "loading" ? "Looking it up…" : "That task isn't open (or the link is wrong).")
+      : q ? "Nothing matches." : view === "chats" ? "No task has a chat yet." : "Nothing here.";
+    $("#out").innerHTML = `<p class="msg">${why}</p>`; return;
+  }
+  $("#out").innerHTML = `<p class="msg">${head}</p>` + shown.map(t => {
+    const c = chats[t.id], subs = all.filter(x => x.parentId === t.id).map(x => x.title);
+    const meta = [dueText(t), esc(t.list), t.closed ? "done or deleted" : ""].filter(Boolean).join(" · ");
     const tt = t.projectId ? `<a class="link" href="https://ticktick.com/webapp/#p/${esc(t.projectId)}/tasks/${esc(t.id)}" target="_blank" rel="noopener">TickTick ›</a>` : "";
-    return `<div class="t${openId === t.id ? " open" : ""}" id="t-${esc(t.id)}">
-      <button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="ti">${esc(t.title)}<span class="meta">${esc(meta)}</span></span>${c ? '<span class="dot">✦ chat</span>' : ""}</button>
-      <div class="body">${t.content || t.desc ? `<div class="content">${esc((t.content || t.desc).slice(0, 2000))}</div>` : ""}
-        ${t.subtasks?.length ? `<ul class="subs">${t.subtasks.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+    return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" : ""}">
+      <button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
+        <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>
+      <div class="body">${t.content ? `<div class="content">${esc(t.content)}</div>` : ""}
+        ${subs.length ? `<ul class="subs">${subs.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
         <div class="row">${action(t)}</div><div class="row">${tt}</div></div></div>`;
   }).join("");
 }
 
-async function loadChats() { chats = (await api("api/tt/chats")).chats || {}; }
-
-async function show() {
-  const id = $("#list").value;
-  store.set("tc-list", id);
-  $("#out").innerHTML = `<p class="msg">Loading…</p>`;
+async function load(fresh) {
   try {
-    await loadChats();
-    tasks = id === "chats"
-      ? Object.entries(chats).map(([tid, c]) => ({id: tid, title: c.title}))
-      : ((await api(`api/tt/tasks?list=${encodeURIComponent(id)}`)).tasks || []);
+    const [r, c] = await Promise.all([api("api/tt/all" + (fresh ? "?fresh=1" : "")), api("api/tt/chats")]);
+    all = r.tasks || []; byId = Object.fromEntries(all.map(t => [t.id, t])); chats = c.chats || {};
     render();
-  } catch (e) { $("#out").innerHTML = `<p class="msg bad">Couldn't load: ${esc(e.message)}</p>`; }
+    if (r.error) $("#out").insertAdjacentHTML("afterbegin", `<p class="msg bad">Showing an older copy: ${esc(r.error)}</p>`);
+  } catch (e) { $("#out").innerHTML = `<p class="msg bad">Couldn't load your tasks: ${esc(e.message)}</p>`; }
 }
 
 async function start(id) {
   const btn = document.querySelector(`[data-start="${id}"]`), st = $(`#st-${id}`);
   btn.disabled = true; st.className = "status"; st.textContent = "Starting…";
   try {
-    const t = tasks.find(x => x.id === id) || {};
-    const r = await api("api/task-chat", {task_id: id, list: t.list || listName($("#list").value), note: $(`#note-${id}`)?.value || ""});
+    const t = byId[id] || (linked && linked.id === id ? linked : {});
+    const r = await api("api/task-chat", {task_id: id, list: t.list || "", note: $(`#note-${id}`)?.value || ""});
     chats[id] = {job: r.id, rc_url: r.rc_url, title: t.title, live: true};
     if (!r.rc_url) waitForLink(id);
     render();
   } catch (e) { st.className = "status bad"; st.textContent = `Didn't start: ${e.message}`; btn.disabled = false; }
 }
 
-// The chat's link appears a few seconds after it starts. Then the button becomes "Open chat".
+// The chat's link appears a few seconds after it starts; then the button becomes "Open chat".
 function waitForLink(id, tries = 0) {
   clearTimeout(polling);
   polling = setTimeout(async () => {
-    try { await loadChats(); } catch {}
+    try { chats = (await api("api/tt/chats")).chats || {}; } catch {}
     if (chats[id]?.rc_url || tries > 30) render(); else waitForLink(id, tries + 1);
   }, 2000);
 }
 
+let typing;
+$("#q").oninput = () => {
+  clearTimeout(typing);
+  typing = setTimeout(async () => {
+    const id = linkedId($("#q").value);
+    if (id && !byId[id] && (!linked || linked.id !== id)) {
+      linked = "loading"; openId = id; render();
+      try { linked = (await api(`api/tt/task?id=${id}`)).task; if (linked.status) linked.closed = true; } catch { linked = null; }
+    } else if (id) openId = id;
+    render();
+  }, 150);
+};
 document.addEventListener("click", e => {
+  const v = e.target.closest("[data-view]");
+  if (v) { view = v.dataset.view; store.set("tc-view", view); $("#q").value = ""; openId = null; render(); return; }
   const tog = e.target.closest("[data-toggle]");
   if (tog) { openId = openId === tog.dataset.toggle ? null : tog.dataset.toggle; render(); return; }
   const st = e.target.closest("[data-start]");
@@ -138,18 +245,8 @@ document.addEventListener("click", e => {
   if (res) fetch("api/task-chat", {method: "POST", keepalive: true, headers: {"Content-Type": "application/json"},
     body: JSON.stringify({task_id: res.dataset.resume, list: "", note: ""})}).catch(() => {});
 });
-$("#list").onchange = show;
-$("#q").oninput = render;
-
-(async () => {
-  try {
-    lists = (await api("api/tt/lists")).lists || [];
-    $("#list").insertAdjacentHTML("beforeend", lists.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join(""));
-    const saved = store.get("tc-list");
-    $("#list").value = [...$("#list").options].some(o => o.value === saved) ? saved : "inbox";
-  } catch (e) { $("#out").innerHTML = `<p class="msg bad">Couldn't load your lists: ${esc(e.message)}</p>`; return; }
-  show();
-})();
+$("#reload").onclick = () => { $("#out").insertAdjacentHTML("afterbegin", `<p class="msg">Refreshing…</p>`); load(true).then(() => setTimeout(() => load(), 6000)); };
+load();
 </script>
 </body>
 </html>

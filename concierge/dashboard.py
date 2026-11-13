@@ -277,12 +277,12 @@ def task_chat_request(headers, raw: bytes, *, opener=None, last_chat=None) -> tu
 
 def ticktick_get(route: str, query: dict) -> tuple[int, dict]:
     try:
-        if route == "/api/tt/lists":
-            return 200, {"lists": ticktick.lists()}
-        list_id = (query.get("list") or [""])[0]
-        if not TICKTICK_ID.match(list_id):
-            return 400, {"error": "bad list id"}
-        return 200, {"tasks": ticktick.open_tasks(list_id)}
+        if route == "/api/tt/all":
+            return 200, ticktick.all_open(fresh=bool(query.get("fresh")))
+        task_id = (query.get("id") or [""])[0]
+        if not TICKTICK_ID.match(task_id):
+            return 400, {"error": "bad task id"}
+        return 200, {"task": ticktick.one(task_id)}
     except Exception as exc:  # noqa: BLE001 - expired login, TickTick down: say so on the page
         return 502, {"error": str(exc)}
 
@@ -326,7 +326,7 @@ def handler_for(sampler: Sampler):
             if self._route() == "/tasks":
                 self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
                 return
-            if self._route() in ("/api/tt/lists", "/api/tt/tasks"):
+            if self._route() in ("/api/tt/all", "/api/tt/task"):
                 self._json(*ticktick_get(self._route(), urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
                 return
             if self._route() == "/api/tt/chats":

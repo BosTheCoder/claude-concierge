@@ -1,4 +1,4 @@
-"""Read-only TickTick for the tasks page: lists and their open tasks.
+"""Read-only TickTick for the tasks page: every open task, cached briefly.
 
 Talks to TickTick's MCP endpoint with Claude Code's own TickTick login, the way
 ticktick-triage does. That token has no refresh: when it expires the page says
@@ -8,9 +8,13 @@ so, and re-connecting TickTick via /mcp in Claude Code fixes it.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from concierge import registry
 
 MCP_URL = "https://mcp.ticktick.com/"
 CREDENTIALS = Path.home() / ".claude/.credentials.json"
@@ -39,17 +43,99 @@ def call(name: str, arguments: dict):
     return sc.get("result", sc) if isinstance(sc, dict) else json.loads(resp["result"]["content"][0]["text"])
 
 
-def lists() -> list[dict]:
-    return [{"id": p["id"], "name": p["name"]} for p in call("list_projects", {})
-            if not p.get("closed") and p.get("kind") != "NOTE"]
+CACHE_SECONDS = 600
+_cache: dict = {"at": 0.0, "tasks": []}
+_lock = threading.Lock()
+KEEP = ("id", "projectId", "title", "dueDate", "isAllDay", "timeZone", "priority", "tags", "parentId", "kind")
 
 
-def open_tasks(project_id: str) -> list[dict]:
-    """Top-level open tasks, newest first; subtasks ride along as their parent's titles."""
-    tasks = call("get_project_with_undone_tasks", {"project_id": project_id}).get("tasks") or []
-    by_id = {t["id"]: t for t in tasks}
-    keep = ("id", "projectId", "title", "content", "desc", "dueDate", "priority", "tags", "parentId")
-    out = [{k: t.get(k) for k in keep} | {"subtasks": [by_id[c]["title"] for c in t.get("childIds") or [] if c in by_id]}
-           for t in tasks if not t.get("parentId") or t["parentId"] not in by_id]
-    out.sort(key=lambda t: t["id"], reverse=True)  # ObjectIds start with their creation time
-    return out
+def _slim(t: dict, project: dict) -> dict:
+    body = (t.get("content") or t.get("desc") or "")[:800]
+    items = [i.get("title") or "" for i in t.get("items") or []]
+    return {k: t.get(k) for k in KEEP} | {"content": body, "items": items,
+                                          "list": project["name"], "groupId": project.get("groupId")}
+
+
+FILTER_CAP = 200  # filter_tasks silently stops at 200 results
+COUNTS = Path(__file__).resolve().parent.parent / "state" / "ticktick-counts.json"
+
+
+def group_lists(list_ids, counts, limit):
+    """Pack lists into filter_tasks calls whose last-known open-task totals stay under `limit`.
+    A list with no known count, or one that alone reaches the limit, gets a call of its own.
+    Copied from ticktick-triage (core.group_lists)."""
+    groups, cur, size = [], [], 0
+    for lid in sorted(list_ids, key=lambda l: -counts.get(l, limit)):
+        n = counts.get(lid)
+        if n is None or n >= limit:
+            groups.append([lid])
+        elif size + n <= limit:
+            cur.append(lid)
+            size += n
+        else:
+            groups.append(cur)
+            cur, size = [lid], n
+    return groups + ([cur] if cur else [])
+
+
+def _fetch() -> list[dict]:
+    """~8 calls once list sizes are known (TickTick allows 300 per 5 minutes, shared with
+    every other TickTick tool); one per list the very first time."""
+    # Note lists (Gratitude Journal…) never show in his filters. A note inside a task list does
+    # (Learning Log, tagged #today), so only whole note lists are skipped.
+    projects = {p["id"]: p for p in call("list_projects", {}) if not p.get("closed") and p.get("kind") != "NOTE"}
+    projects["inbox115800449"] = projects.pop("inbox", {"id": "inbox", "name": "Inbox"})
+    counts = json.loads(COUNTS.read_text()) if COUNTS.exists() else {}
+
+    def read(group):
+        got = call("filter_tasks", {"filter": {"projectIds": group, "status": [0]}}) if len(group) > 1 else []
+        if len(group) == 1 or len(got) >= FILTER_CAP - 20:  # one list, or possibly truncated
+            got = [t for pid in group for t in
+                   call("get_project_with_undone_tasks", {"project_id": projects[pid]["id"]}).get("tasks") or []]
+        return got
+
+    with ThreadPoolExecutor(4) as pool:
+        raw = [t for ts in pool.map(read, group_lists(list(projects), counts, FILTER_CAP - 20)) for t in ts]
+    fresh_counts = {pid: 0 for pid in projects}
+    for t in raw:
+        fresh_counts[t["projectId"]] = fresh_counts.get(t["projectId"], 0) + 1
+    registry._atomic_write(COUNTS, json.dumps(fresh_counts))
+    return [_slim(t, projects.get(t["projectId"], {"name": "?"})) for t in raw]
+
+
+def _refresh() -> None:
+    try:
+        tasks = _fetch()
+        _cache.update(at=time.time(), tasks=tasks, error=None)
+    except Exception as exc:  # noqa: BLE001 - the page shows it beside the stale list
+        _cache.update(error=str(exc), failed_at=time.time())
+    finally:
+        _lock.release()
+
+
+def all_open(fresh: bool = False) -> dict:
+    """Every open task in every open list: a handful of filter_tasks calls.
+
+    Answers from the cache straight away and refreshes behind it once it is older than
+    CACHE_SECONDS, so the page opens instantly. Only the very first call waits.
+    """
+    # After a failure (rate limit: 300 calls per 5 min, shared with all his TickTick tools) wait a
+    # minute before trying again, or every page load would keep the limit topped up.
+    backing_off = time.time() - _cache.get("failed_at", 0) < 60
+    if (fresh or time.time() - _cache["at"] > CACHE_SECONDS) and not backing_off and _lock.acquire(blocking=False):
+        if _cache["tasks"]:
+            threading.Thread(target=_refresh, daemon=True).start()
+        else:
+            _refresh()
+    elif not _cache["tasks"]:
+        with _lock:  # someone else's first fetch is running
+            pass
+    if not _cache["tasks"] and _cache.get("error"):
+        raise RuntimeError(_cache["error"])
+    return {"tasks": _cache["tasks"], "at": _cache["at"], "error": _cache.get("error")}
+
+
+def one(task_id: str) -> dict:
+    t = call("get_task_by_id", {"task_id": task_id})
+    t = t.get("result", t)
+    return _slim(t, {"name": "", "groupId": None}) | {"status": t.get("status")}
