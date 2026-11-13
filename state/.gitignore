@@ -10,3 +10,5 @@ reaper.log
 later.json
 task-chats.json
 ticktick-counts.json
+threads.db
+threads.db-*

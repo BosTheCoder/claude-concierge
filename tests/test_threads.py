@@ -106,3 +106,21 @@ def test_sunset_is_about_right_for_london():
     s = threads.sunset(date(2026, 11, 13))
     assert (s.hour, 5 <= s.minute <= 25) == (16, True)   # ~16:13 in mid-November
     assert threads.sunset(date(2026, 6, 21)).hour == 21   # ~21:21 midsummer
+
+
+def test_the_app_api_refuses_a_bad_answer_and_serves_alarms(db, clock, monkeypatch, tmp_path):
+    from concierge import app_api
+
+    th = threads.find_or_create(db, job="A1", title="Plumber", pane="p")
+    alarms, sender = sent_alarms()
+    mid = threads.post(db, th, "Which?", urgency="urgent", options=["A", "B"], sender=sender)
+    monkeypatch.setattr(threads, "DB_FILE", tmp_path / "t.db")  # the API opens its own connection
+    ran = []
+    monkeypatch.setattr(app_api, "_bg", lambda fn, *a, **k: ran.append((fn.__name__, a)))
+    assert app_api.post(f"/api/threads/{th['id']}/answer", {"msg": mid, "choice": "A"})[0] == 200
+    assert ran == [("answer", (mid, "A"))]
+    threads.answer(db, mid, "A", submitter=lambda *_: None)
+    assert app_api.post(f"/api/threads/{th['id']}/answer", {"msg": mid, "choice": "B"})[0] == 400
+    status, alarm = app_api.get("/api/alarms/" + alarms[0][1].rsplit("/", 1)[1], {})
+    assert (status, alarm["level"], alarm["open"]) == (200, "urgent", f"https://box.example.ts.net/app#t={th['id']}")
+    assert app_api.get("/api/alarms/nope", {})[0] == 404

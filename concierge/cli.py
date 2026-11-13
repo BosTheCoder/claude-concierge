@@ -393,7 +393,9 @@ def ensure_up_cmd():
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
     typer.echo(run_later())
-    typer.echo(run_dashboard())
+    dash = run_dashboard()
+    typer.echo(dash)
+    typer.echo(run_threads(dash))
 
 
 @app.command("heartbeat")
@@ -581,8 +583,30 @@ def run_later() -> str:
         return f"later-error: {exc}"
 
 
-if __name__ == "__main__":
-    app()
+def run_threads(dash: str) -> str:
+    """The threads tick (modes, quiet threads), and the app's backup alarm: if the
+    dashboard had to be started two ticks running, it isn't staying up, so say so on
+    Telegram, where he'll see it without the app. Same total guard."""
+    try:
+        from concierge import threads
+
+        db = threads.connect()
+        try:
+            out = threads.tick(db)
+            strikes = int(threads._kv(db, "dash_strikes", "0"))
+            strikes = strikes + 1 if ("started" in dash or "dash-error" in dash) else 0
+            threads._set_kv(db, "dash_strikes", str(strikes))
+            if strikes == 2 and config.NOTIFICATIONS_CHAT_ID:
+                telegram.send(config.NOTIFICATIONS_CHAT_ID,
+                              f"The Concierge app is down: the dashboard won't stay up ({dash}). "
+                              "Job messages are still in the threads, but no alerts are reaching glance.")
+                out += "; told Telegram the app is down"
+            return out
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"threads-error: {exc}"
+
 
 
 # --- threads: what the app shows (threads.py) -----------------------------------------
@@ -720,3 +744,7 @@ def threads_tick_cmd():
 
     with threads.connect() as db:
         typer.echo(threads.tick(db))
+
+
+if __name__ == "__main__":
+    app()

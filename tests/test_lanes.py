@@ -136,6 +136,7 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
     monkeypatch.setattr(cli, "run_lanes", lambda: "lanes ran")
     monkeypatch.setattr(cli, "run_later", lambda: "later: nothing due")
     monkeypatch.setattr(cli, "run_dashboard", lambda: "dash: healthy")
+    monkeypatch.setattr(cli, "run_threads", lambda dash: "threads: nothing to do")
 
     printed = []
     monkeypatch.setattr(cli.typer, "echo", printed.append)
@@ -149,6 +150,7 @@ def test_ensure_up_runs_the_lanes(monkeypatch):
         "lanes ran",
         "later: nothing due",
         "dash: healthy",
+        "threads: nothing to do",
     ]
 
 

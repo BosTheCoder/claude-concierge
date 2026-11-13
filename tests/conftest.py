@@ -44,3 +44,11 @@ def no_rendered_prompts(monkeypatch, tmp_path):
 def no_real_message_log(monkeypatch, tmp_path):
     """telegram.send appends to the live message log. Keep the suite out of it."""
     monkeypatch.setenv("TELEGRAM_STATE_DIR", str(tmp_path / "telegram"))
+
+
+@pytest.fixture(autouse=True)
+def no_real_threads_db(monkeypatch, tmp_path):
+    """The threads app's SQLite file is live state. Keep the suite out of it."""
+    from concierge import threads
+
+    monkeypatch.setattr(threads, "DB_FILE", tmp_path / "threads.db")

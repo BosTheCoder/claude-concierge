@@ -123,6 +123,8 @@ class App:
     base_url: str = ""
     alarm_account: str = ""
     mirror_to_telegram: bool = True
+    brief_runs: str = ""
+    brief_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -265,6 +267,8 @@ def load(path: Path | None = None) -> Settings:
             base_url=str(ap.get("base_url") or "").rstrip("/"),
             alarm_account=str(ap.get("alarm_account") or "").strip().lower(),
             mirror_to_telegram=bool(ap.get("mirror_to_telegram", True)),
+            brief_runs=str(ap.get("brief_runs") or ""),
+            brief_url=str(ap.get("brief_url") or ""),
         ),
         source=source,
         is_example=is_example,

@@ -30,6 +30,11 @@ def claude_argv(
         config.PERMISSION_MODE,
         "--append-system-prompt-file",
         str(prompt_file),
+        # Decisions go to his app as buttons (`concierge ask`). The question menu is
+        # what a line typed into the pane answered with Enter: a WhatsApp alert accepted
+        # a £450 quote that way on 30 Oct.
+        "--disallowedTools",
+        "AskUserQuestion",
     ]
     if brief is None:
         return argv + ["--resume", session_id]

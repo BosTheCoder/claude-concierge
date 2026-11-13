@@ -42,7 +42,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from concierge import config, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
+from concierge import app_api, config, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
 
 # Fast enough that a reap shows up on the next poll, slow enough that the
 # dashboard is not itself a load on the machine it exists to relieve. One poll
@@ -366,6 +366,16 @@ def handler_for(sampler: Sampler):
             return path[len(CLAUDE_PREFIX):] if path.startswith(CLAUDE_PREFIX + "/") else path
 
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
+            route = self._route()
+            if route in ("/app", "/app/"):
+                self._send(200, app_api.APP_HTML.read_bytes(), "text/html; charset=utf-8")
+                return
+            if route == "/app/manifest.webmanifest":
+                self._send(200, app_api.manifest().encode(), "application/manifest+json")
+                return
+            if route.startswith(("/api/threads", "/api/alarms/", "/api/settings")):
+                self._json(*app_api.get(route, urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
+                return
             if self._route() == "/claude.js":
                 self._send(200, CLAUDE_JS.read_bytes(), "text/javascript; charset=utf-8")
                 return
@@ -399,6 +409,20 @@ def handler_for(sampler: Sampler):
             self._send(404, b"no", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802
+            if self._route().startswith(("/api/threads", "/api/settings", "/api/delegations")):
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= MAX_BODY:
+                    self._json(400, {"ok": False, "error": "bad body length"})
+                    return
+                body = _read_post(self.headers, self.rfile.read(length))
+                if isinstance(body, tuple):
+                    self._json(*body)
+                    return
+                self._json(*app_api.post(self._route(), body, lock=REGISTRY_LOCK, finish=finish_start))
+                return
             if self._route() in ("/api/task-chat", "/api/tt/update"):
                 try:
                     length = int(self.headers.get("Content-Length") or 0)

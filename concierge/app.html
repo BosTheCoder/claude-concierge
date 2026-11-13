@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark">
+<title>Concierge</title>
+<link rel="manifest" href="app/manifest.webmanifest">
+<link rel="icon" href="data:,">
+<meta name="theme-color" content="#0e1116">
+<style>
+  :root { --bg:#0e1116; --card:#171b22; --line:#262c36; --ink:#e6edf3; --dim:#8b949e;
+    --red:#f85149; --amber:#d29922; --green:#3fb950; --blue:#58a6ff; --grey:#6e7681; --me:#1f3a5f; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  button, input, textarea, select { font:inherit; color:inherit; }
+  a { color:var(--blue); }
+  header { position:sticky; top:0; z-index:5; background:var(--bg); padding:calc(env(safe-area-inset-top) + 10px) 14px 8px;
+    display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:19px; margin:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .icon { background:none; border:0; font-size:20px; padding:6px 8px; cursor:pointer; color:var(--dim); }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:#2d2a12; color:var(--amber); white-space:nowrap; }
+  main { padding:10px 12px 110px; max-width:720px; margin:0 auto; }
+  .chips { display:flex; gap:6px; overflow-x:auto; padding:2px 0 8px; scrollbar-width:none; }
+  .chip { border:1px solid var(--line); background:var(--card); border-radius:99px; padding:5px 12px; font-size:14px;
+    white-space:nowrap; cursor:pointer; }
+  .chip.on { background:var(--blue); color:#0e1116; border-color:var(--blue); }
+  input.search { width:100%; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin-bottom:8px; }
+  .row { display:block; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--grey);
+    border-radius:10px; padding:10px 12px; margin:8px 0; text-decoration:none; color:inherit; }
+  .row.needs { border-left-color:var(--blue); } .row.urgent { border-left-color:var(--amber); } .row.critical { border-left-color:var(--red); }
+  .row .t { font-weight:600; display:flex; gap:8px; align-items:baseline; }
+  .row .t span:first-child { flex:1; }
+  .row .need { font-size:13px; font-weight:600; margin-top:2px; }
+  .need.decision { color:var(--amber); } .need.reply { color:var(--blue); } .need.nothing { color:var(--dim); font-weight:400; }
+  .row .last { color:var(--dim); font-size:14px; margin-top:3px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .age { color:var(--dim); font-size:12px; font-weight:400; white-space:nowrap; }
+  .brief { background:#132018; border:1px solid #23402c; border-radius:10px; padding:10px 12px; margin:4px 0 10px; display:block; color:inherit; text-decoration:none; }
+  .brief b { color:var(--green); }
+  .fab { position:fixed; right:18px; bottom:calc(env(safe-area-inset-bottom) + 18px); width:58px; height:58px; border-radius:50%;
+    border:0; background:var(--blue); color:#0e1116; font-size:30px; box-shadow:0 4px 14px #0008; cursor:pointer; }
+  .muted { color:var(--dim); font-size:14px; }
+  .facts { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; font-size:14px; }
+  .facts div { display:flex; gap:8px; } .facts b { color:var(--dim); font-weight:500; min-width:84px; }
+  .msg { max-width:88%; margin:8px 0; padding:8px 11px; border-radius:12px; background:var(--card); border:1px solid var(--line);
+    white-space:pre-wrap; overflow-wrap:anywhere; }
+  .msg.me { margin-left:auto; background:var(--me); border-color:#2b4c78; }
+  .msg.app { background:none; border-style:dashed; }
+  .msg .who { font-size:12px; color:var(--dim); margin-bottom:2px; display:flex; gap:6px; align-items:center; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .dot.needs { background:var(--blue); } .dot.urgent { background:var(--amber); } .dot.critical { background:var(--red); } .dot.fyi { background:var(--grey); }
+  .state { font-size:12px; color:var(--dim); text-align:right; margin-top:2px; }
+  .state.failed { color:var(--red); } .state.acted { color:var(--green); }
+  .opts { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  .opts button { text-align:left; background:#0e1116; border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .opts button.rec { border-color:var(--amber); }
+  .opts button.rec::after { content:"  ★ Claude's pick"; color:var(--amber); font-size:12px; }
+  .answered { margin-top:6px; font-size:14px; color:var(--green); }
+  .answered.claude { color:var(--amber); }
+  .composer { position:fixed; left:0; right:0; bottom:0; background:var(--bg); border-top:1px solid var(--line);
+    padding:8px 10px calc(env(safe-area-inset-bottom) + 8px); display:flex; gap:8px; }
+  .composer textarea { flex:1; resize:none; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:9px 12px; max-height:140px; }
+  .btn { background:var(--blue); color:#0e1116; border:0; border-radius:10px; padding:9px 14px; font-weight:600; cursor:pointer; }
+  .btn.ghost { background:var(--card); color:var(--ink); border:1px solid var(--line); font-weight:400; }
+  .btn:disabled { opacity:.5; }
+  .sheet { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; }
+  .sheet label { display:block; font-size:14px; color:var(--dim); margin:10px 0 4px; }
+  .sheet textarea, .sheet input, .sheet select { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .menu { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
+  h2 { font-size:15px; color:var(--dim); margin:18px 0 6px; font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-size:14px; } td, th { padding:5px 6px; border-bottom:1px solid var(--line); text-align:right; }
+  td:first-child, th:first-child { text-align:left; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:90px; background:#30363d; padding:8px 14px; border-radius:8px; font-size:14px; z-index:9; }
+  textarea.capture { width:100%; min-height:40vh; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; }
+</style>
+</head>
+<body>
+<header><button class="icon" id="back" hidden>←</button><h1 id="title">Concierge</h1><span class="pill" id="mode" hidden></span>
+  <button class="icon" id="gear" title="Settings">⚙</button></header>
+<main id="main"></main>
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+const LV = ["fyi","needs","urgent","critical"], LVNAME = {fyi:"FYI", needs:"Needs me", urgent:"Urgent", critical:"Critical"};
+const NEED = {decision:"Decision needed", reply:"Reply needed", nothing:"Nothing needed"};
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+let timer = null, filter = {need:"all", urg:"all"}, homeQ = "", showClosed = false;
+
+async function api(path, body) {
+  const r = await fetch("api/" + path, body === undefined ? {} :
+    {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({error:"bad reply"}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+function toast(t) { const d = document.createElement("div"); d.className = "toast"; d.textContent = t;
+  document.body.append(d); setTimeout(() => d.remove(), 2600); }
+function age(iso) { const s = (Date.now() - new Date(iso)) / 1000;
+  return s < 60 ? "now" : s < 3600 ? `${Math.floor(s/60)}m` : s < 86400 ? `${Math.floor(s/3600)}h` : `${Math.floor(s/86400)}d`; }
+function head(title, back) { $("#title").textContent = title; $("#back").hidden = !back; }
+function poll(fn, ms) { clearInterval(timer); timer = setInterval(() => document.visibilityState === "visible" && fn(true), ms); }
+
+// --- home -------------------------------------------------------------------------------
+async function home(quiet) {
+  head("Concierge", false);
+  let d;
+  try { d = await api(`threads?${showClosed ? "closed=1&" : ""}q=${encodeURIComponent(homeQ)}`); }
+  catch (e) { if (!quiet) $("#main").innerHTML = `<p class="muted">Can't reach the concierge: ${esc(e.message)}</p>`; return; }
+  $("#mode").hidden = !d.mode; $("#mode").textContent = d.mode ? `${d.mode} on` : "";
+  const rows = d.threads.filter(t => (filter.need === "all" || t.needs === filter.need) && (filter.urg === "all" || t.urgency === filter.urg));
+  const chips = (key, vals, names) => vals.map(v => `<button class="chip ${filter[key] === v ? "on" : ""}" data-f="${key}" data-v="${v}">${names[v] || "All"}</button>`).join("");
+  const focused = document.activeElement && document.activeElement.id === "q";
+  if (quiet && focused) return;  // don't redraw under his typing
+  $("#main").innerHTML = `
+    <input class="search" id="q" placeholder="Search threads, open and closed" value="${esc(homeQ)}">
+    <div class="chips">${chips("need", ["all","decision","reply","nothing"], {decision:"Decision", reply:"Reply", nothing:"FYI"})}</div>
+    <div class="chips">${chips("urg", ["all","critical","urgent","needs","fyi"], LVNAME)}</div>
+    ${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
+    ${rows.map(t => `<a class="row ${t.urgency}" href="#t=${t.id}">
+        <div class="t"><span>${esc(t.title)}</span><span class="age">${age(t.updated)}</span></div>
+        <div class="need ${t.needs}">${t.status === "closed" ? "Closed" : NEED[t.needs]}${t.urgency !== "fyi" && t.needs !== "nothing" ? " · " + LVNAME[t.urgency] : ""}${t.floor ? " · turned down" : ""}</div>
+        <div class="last">${t.last_author === "me" ? "You: " : ""}${esc(t.last)}</div></a>`).join("") || `<p class="muted">Nothing here.</p>`}
+    <p><button class="btn ghost" id="closed">${showClosed ? "Open threads" : "Closed threads"}</button></p>
+    <button class="fab" id="fab" title="New thread">+</button>`;
+  $("#main").querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter[b.dataset.f] = b.dataset.v; home(); });
+  $("#closed").onclick = () => { showClosed = !showClosed; home(); };
+  $("#fab").onclick = () => location.hash = "new";
+  let deb; $("#q").oninput = e => { clearTimeout(deb); deb = setTimeout(() => { homeQ = e.target.value; home(); setTimeout(() => { const q = $("#q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 300); };
+  poll(home, 10000);
+}
+
+// --- a thread ---------------------------------------------------------------------------
+let current = null, lastSig = "";
+async function thread(id, quiet) {
+  let t;
+  try { t = await api(`threads/${id}`); } catch (e) { $("#main").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  const sig = JSON.stringify([t.messages, t.facts, t.status, t.floor, t.delegation]);
+  if (quiet && sig === lastSig) return;
+  lastSig = sig; current = t;
+  head(t.title, true);
+  const facts = Object.entries(t.facts || {});
+  const draft = $("#say") ? $("#say").value : "";
+  const atBottom = innerHeight + scrollY >= document.body.scrollHeight - 80;
+  $("#main").innerHTML = `
+    <div class="menu">
+      <button class="btn ghost" id="floor">${t.floor ? "Turn back up" : "Turn down to FYI"}</button>
+      <button class="btn ghost" id="openclose">${t.status === "closed" ? "Reopen" : "Close"}</button>
+      <button class="btn ghost" id="deleg">${t.delegation ? "Delegated to Claude" : "Hand decisions to Claude"}</button>
+    </div>
+    <div id="sheet"></div>
+    ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div><b>${esc(k)}</b><span>${linkify(v)}</span></div>`).join("")}</div>` : ""}
+    ${t.messages.map(msg).join("")}
+    ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}`;
+  if (!$(".composer")) document.body.insertAdjacentHTML("beforeend",
+    `<div class="composer"><textarea id="say" rows="1" placeholder="Message"></textarea><button class="btn" id="send">Send</button></div>`);
+  $("#say").value = draft;
+  $("#send").onclick = send; $("#say").oninput = e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; };
+  $("#floor").onclick = () => act("floor", {floor: t.floor ? null : "fyi"});
+  $("#openclose").onclick = () => act(t.status === "closed" ? "reopen" : "close", {});
+  $("#deleg").onclick = () => delegForm(t);
+  $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
+  $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
+  if (!quiet || atBottom) scrollTo(0, document.body.scrollHeight);
+  poll(() => thread(id, true), 3000);
+}
+function msg(m) {
+  const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
+  const states = {sent:"✓ sent", picked:"✓✓ picked up", acted:"✓✓ acted on", failed:"⚠ not delivered: " + (m.error || "")};
+  let opts = "";
+  if (m.options) {
+    if (m.answer !== null && m.answer !== undefined) {
+      opts = m.answered_by === "claude"
+        ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
+        : `<div class="answered">You chose “${esc(m.answer)}”</div>`;
+    } else {
+      opts = `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
+    }
+  }
+  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${opts}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
+}
+async function act(action, body) {
+  try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }
+  catch (e) { toast(e.message); }
+}
+async function send() {
+  const text = $("#say").value.trim(); if (!text) return;
+  $("#send").disabled = true;
+  try { await api(`threads/${current.id}/say`, {text}); $("#say").value = ""; $("#say").style.height = "auto";
+    setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
+  catch (e) { toast(e.message); }
+  $("#send").disabled = false;
+}
+async function choose(id, choice) {
+  try { await api(`threads/${current.id}/answer`, {msg:id, choice}); toast(`Sent: ${choice}`);
+    setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
+  catch (e) { toast(e.message); }
+}
+async function undo(id) {
+  try { await api(`threads/${current.id}/undo`, {msg:id}); toast("Claude has been told to undo it"); lastSig = ""; thread(current.id); }
+  catch (e) { toast(e.message); }
+}
+function delegForm(t) {
+  if (t.delegation) {
+    const d = t.delegation;
+    $("#sheet").innerHTML = `<div class="sheet"><b>Claude may decide here</b>${d.until ? ` until ${esc(new Date(d.until).toLocaleString())}` : ""}${d.thread ? "" : " (all threads)"}
+      <p style="white-space:pre-wrap">${esc(d.spec)}</p><button class="btn" id="end">Stop delegating</button></div>`;
+    $("#end").onclick = async () => { await api("delegations/end", {id:d.id}); lastSig = ""; thread(t.id); };
+    return;
+  }
+  const qs = [["may", "What may Claude decide on its own?", "e.g. which day a contractor comes, chasing replies"],
+    ["never", "What is off limits?", "e.g. hiring, anything the tenant has to agree to"],
+    ["money", "Money limit (£). Blank = Claude spends nothing", ""],
+    ["ask", "When must it stop and ask you?", "e.g. a quote changes, someone complains"],
+    ["lean", "When it's unsure between options, prefer…", "e.g. the one I can reverse, the cheaper one"]];
+  $("#sheet").innerHTML = `<div class="sheet"><b>Hand decisions to Claude</b>
+    ${qs.map(([k, q, ph]) => `<label>${q}</label><textarea id="d_${k}" rows="2" placeholder="${esc(ph)}"></textarea>`).join("")}
+    <label>Covers</label><select id="d_scope"><option value="thread">This thread</option><option value="all">All threads</option></select>
+    <label>Only this kind of decision (optional)</label><input id="d_kind" placeholder="e.g. scheduling">
+    <label>Until (blank = until you stop it)</label><input id="d_until" type="datetime-local">
+    <p><button class="btn" id="d_go">Start</button> <button class="btn ghost" id="d_x">Cancel</button></p></div>`;
+  $("#d_x").onclick = () => $("#sheet").innerHTML = "";
+  $("#d_go").onclick = async () => {
+    const v = k => $("#d_" + k).value.trim();
+    if (!v("may")) return toast("Say what Claude may decide");
+    const spec = [`May decide: ${v("may")}`, v("never") && `Off limits: ${v("never")}`,
+      `Money: ${v("money") ? "up to £" + v("money") + " per decision" : "none, any spend goes to Kelvin"}`,
+      v("ask") && `Ask Kelvin when: ${v("ask")}`, v("lean") && `When unsure, prefer: ${v("lean")}`].filter(Boolean).join("\n");
+    const until = v("until") ? new Date(v("until")).toISOString() : "";
+    try { await api(`threads/${t.id}/delegate`, {spec, scope:v("scope"), kind:v("kind"), until}); lastSig = ""; thread(t.id); }
+    catch (e) { toast(e.message); }
+  };
+}
+
+// --- quick capture --------------------------------------------------------------------
+function capture() {
+  head("New thread", true);
+  const p = new URLSearchParams(location.search);
+  const shared = [p.get("title"), p.get("text"), p.get("url")].filter(Boolean).join("\n");
+  $("#main").innerHTML = `<textarea class="capture" id="cap" placeholder="What do you need? (tap the mic on the keyboard to talk)">${esc(shared)}</textarea>
+    <p><button class="btn" id="go">Start</button></p>`;
+  history.replaceState(null, "", location.pathname + location.hash);
+  $("#cap").focus();
+  $("#go").onclick = async () => {
+    const text = $("#cap").value.trim(); if (!text) return;
+    $("#go").disabled = true; $("#go").textContent = "Starting…";
+    try { const r = await api("threads", {text}); toast("Started"); location.hash = `t=${r.id}`; }
+    catch (e) { toast(e.message); $("#go").disabled = false; $("#go").textContent = "Start"; }
+  };
+}
+
+// --- settings: rules, modes, delegations, stats ----------------------------------------
+async function settings() {
+  head("Settings", true);
+  const s = await api("settings");
+  const modeRow = m => `<div class="sheet" data-mode="${m.id || ""}">
+      <label>Name</label><input class="m_name" value="${esc(m.name || "")}">
+      <label>What gets through</label><div class="menu">${LV.map(l => `<label style="margin:0"><input type="checkbox" class="m_allow" value="${l}" ${m.allow && m.allow.includes(l) ? "checked" : ""}> ${LVNAME[l]}</label>`).join(" ")}</div>
+      <label>From</label><div class="menu"><select class="m_sd">${DAYS.map((d, i) => `<option value="${i}" ${i === m.start_day ? "selected" : ""}>${d}</option>`).join("")}</select>
+        <input class="m_st" value="${esc(m.start_time || "sunset")}" placeholder="HH:MM or sunset" style="width:9em"></div>
+      <label>Until</label><div class="menu"><select class="m_ed">${DAYS.map((d, i) => `<option value="${i}" ${i === m.end_day ? "selected" : ""}>${d}</option>`).join("")}</select>
+        <input class="m_et" value="${esc(m.end_time || "sunset")}" placeholder="HH:MM or sunset" style="width:9em"></div>
+      <label><input type="checkbox" class="m_on" ${m.enabled !== 0 ? "checked" : ""}> On</label>
+      <p><button class="btn m_save">Save</button> ${m.id ? `<button class="btn ghost m_del">Delete</button>` : ""}</p></div>`;
+  $("#main").innerHTML = `
+    <h2>Global decision rules</h2><p class="muted">Every decision Claude takes follows these, plus the thread's own spec.</p>
+    <textarea id="rules" class="capture" style="min-height:8em">${esc(s.rules)}</textarea><p><button class="btn" id="saverules">Save rules</button></p>
+    <h2>Delegations in force</h2>${s.delegations.map(d => `<div class="sheet"><b>${d.thread ? esc(d.title || "thread " + d.thread) : "All threads"}</b>${d.kind ? ` · ${esc(d.kind)}` : ""}${d.until ? ` · until ${esc(new Date(d.until).toLocaleString())}` : ""}
+      <p style="white-space:pre-wrap" class="muted">${esc(d.spec)}</p><button class="btn ghost" data-end="${d.id}">Stop</button></div>`).join("") || `<p class="muted">None. Every decision comes to you.</p>`}
+    <h2>Notification modes</h2><p class="muted">"sunset" works as a time. What a mode holds back arrives as one alert when it ends.</p>
+    ${s.modes.map(modeRow).join("")}<button class="btn ghost" id="addmode">Add a mode</button>
+    <h2>Alerts per week</h2><table><tr><th>Week</th>${LV.map(l => `<th>${LVNAME[l]}</th>`).join("")}</tr>
+      ${s.stats.map(w => `<tr><td>${esc(w.week)}</td>${LV.map(l => `<td>${w[l]}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="5" class="muted">No messages yet</td></tr>`}</table>`;
+  $("#saverules").onclick = async () => { await api("settings/rules", {rules: $("#rules").value}); toast("Saved"); };
+  $("#main").querySelectorAll("[data-end]").forEach(b => b.onclick = async () => { await api("delegations/end", {id:+b.dataset.end}); settings(); });
+  $("#addmode").onclick = () => { $("#addmode").insertAdjacentHTML("beforebegin", modeRow({allow:["critical"], start_day:4, end_day:5})); wireModes(); };
+  wireModes();
+}
+function wireModes() {
+  document.querySelectorAll("[data-mode]").forEach(el => {
+    const g = c => el.querySelector(c);
+    g(".m_save").onclick = async () => {
+      try { await api("settings/mode", {id: el.dataset.mode || null, name: g(".m_name").value, enabled: g(".m_on").checked,
+        allow: [...el.querySelectorAll(".m_allow:checked")].map(x => x.value), start_day: +g(".m_sd").value,
+        start_time: g(".m_st").value.trim(), end_day: +g(".m_ed").value, end_time: g(".m_et").value.trim()});
+        toast("Saved"); settings(); } catch (e) { toast(e.message); }
+    };
+    if (g(".m_del")) g(".m_del").onclick = async () => { await api("settings/mode/delete", {id:+el.dataset.mode}); settings(); };
+  });
+}
+
+// --- routing ----------------------------------------------------------------------------
+function route() {
+  clearInterval(timer); lastSig = ""; current = null;
+  document.querySelector(".composer")?.remove();
+  const h = location.hash.slice(1);
+  if (h.startsWith("t=")) return thread(+h.slice(2));
+  if (h === "new" || new URLSearchParams(location.search).has("text") || new URLSearchParams(location.search).has("url")) return capture();
+  if (h === "settings") return settings();
+  home();
+}
+$("#back").onclick = () => history.length > 1 ? history.back() : (location.hash = "");
+$("#gear").onclick = () => location.hash = "settings";
+addEventListener("hashchange", route);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") current ? thread(current.id, true) : route(); });
+route();
+</script>
+</body>
+</html>
