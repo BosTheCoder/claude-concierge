@@ -103,6 +103,9 @@ class Reaper:
     finished_grace_minutes: int = 15
     waiting_nudge_hours: float = 24.0
     waiting_grace_hours: float = 6.0
+    # A finished job is asked whether anything is left on his side this long
+    # after it went quiet; 12h was his ceiling, shorter is fine (2026-11-15).
+    wrapup_hours: float = 3.0
     enabled: bool = True
 
 

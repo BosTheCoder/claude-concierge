@@ -300,15 +300,21 @@ def decide(
             return Decision(
                 job_id, "spare", f"still working — CPU at {rate:.2f} ticks/s"
             )
-        if not has_written_output(job):
+        # Only the chat knows whether anything is left on his side, so it is
+        # asked (see WRAPUP_TEMPLATE) and closed + archived only on CLOSE.
+        verdict = job.get("wrapup") or ""
+        if verdict == "close":
+            return Decision(job_id, "close", "wrap-up: nothing left for him")
+        if verdict:
+            return Decision(job_id, "spare", f"wrap-up said {verdict}")
+        asked = age_hours(job.get("wrapup_sent_at"), now)
+        if asked is not None:
+            return Decision(job_id, "spare", f"wrap-up asked {asked:.1f}h ago, no verdict yet")
+        if idle < settings.wrapup_hours:
             return Decision(
-                job_id, "spare", "nothing written to the task folder — left to the 7-day prune"
+                job_id, "spare", f"{status} {idle:.1f}h ago, wrap-up at {settings.wrapup_hours:g}h"
             )
-        return Decision(
-            job_id,
-            "reap",
-            f"{status} {idle:.1f}h ago, idle at {rate:.2f} ticks/s, output on disk",
-        )
+        return Decision(job_id, "wrapup", f"{status} {idle:.1f}h ago and idle")
 
     if status == "waiting":
         idle = age_hours(job.get("last_update"), now)
@@ -345,6 +351,77 @@ def decide(
 # --- the entry point ---------------------------------------------------------
 
 
+WRAPUP_DIR = config.REPO / "state" / "wrapup"
+
+WRAPUP_TEMPLATE = (
+    "[Concierge wrap-up] This chat has been idle since it finished. Before it is "
+    "closed and archived, decide whether anything from it is still on Kelvin's side.\n"
+    "1. If something is left for him, a TickTick task must track it AND be up to "
+    "date: read the task now, tick off what this chat has since done, add any next "
+    "step this chat left open, fix the title and due date. Create one, linked to "
+    "this chat, if none exists. A task that exists but is stale does not count.\n"
+    "2. Only if he must answer something inside this chat itself does it stay open.\n"
+    "Then write exactly `CLOSE`, or `KEEP: <one-line reason>`, to {path} and stop."
+)
+
+
+def read_verdict(job_id: str, wrapup_dir: Path) -> str | None:
+    """"close", "keep: <why>", or None while the chat has not answered."""
+    try:
+        text = (wrapup_dir / f"{job_id}.txt").read_text().strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    return "close" if text.upper().startswith("CLOSE") else text[:120].lower()
+
+
+def _api(method: str, path: str) -> dict:
+    """The claude.ai sessions API the CLI itself calls (found in its bundle,
+    not documented), with his existing login. Raises on any failure."""
+    import urllib.request
+
+    home = Path.home()
+    token = json.loads((home / ".claude/.credentials.json").read_text())["claudeAiOauth"]["accessToken"]
+    org = json.loads((home / ".claude.json").read_text())["oauthAccount"]["organizationUuid"]
+    req = urllib.request.Request(
+        f"https://api.anthropic.com{path}",
+        method=method,
+        data=b"{}" if method == "POST" else None,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "ccr-byoc-2025-07-29",
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "x-organization-uuid": org,
+        },
+    )
+    return json.load(urllib.request.urlopen(req, timeout=10))
+
+
+def bridge_id(pid: int | None) -> str | None:
+    """The app's chat id for a live Claude process. Read it before killing the
+    window: the process's registry file goes with it."""
+    if not pid:
+        return None
+    from concierge import rc
+
+    try:
+        return json.loads((rc.SESSIONS_DIR / f"{pid}.json").read_text()).get("bridgeSessionId")
+    except (OSError, ValueError):
+        return None
+
+
+def archive_in_app(session_id: str | None) -> bool:
+    if not session_id:
+        return False
+    try:
+        _api("POST", f"/v1/sessions/{session_id}/archive")
+        return True
+    except Exception:  # noqa: BLE001 - window is already closed; worst case it stays listed
+        return False
+
+
 NUDGE_TEMPLATE = (
     "[{job_id}] {title} — still waiting on you since {when} ({idle:.0f}h). "
     "It asked:\n\n{question}\n\nReply to it, or it closes in {grace:.0f}h and "
@@ -367,35 +444,15 @@ def _default_nudger(job: dict, text: str) -> None:
 def archived_in_app(job: dict, pid: int | None) -> bool:
     """Has he archived this window's chat in the Claude app?
 
-    pid -> ~/.claude/sessions/<pid>.json -> bridgeSessionId -> the same
-    sessions API the CLI uses (found in its bundle, not documented). The record
-    carries archive/unarchive epochs, not a status: archived while the stop
-    epoch is ahead of the unarchive one (seen on D9, 2026-11-15). Any failure
-    reads as "not archived", so this can only ever spare a window.
+    The record carries archive/unarchive epochs, not a status: archived while
+    the stop epoch is ahead of the unarchive one (seen on D9, 2026-11-15). Any
+    failure reads as "not archived", so this can only ever spare a window.
     """
-    if not pid:
+    sid = bridge_id(pid)
+    if not sid:
         return False
     try:
-        from concierge import rc
-
-        sid = json.loads((rc.SESSIONS_DIR / f"{pid}.json").read_text()).get("bridgeSessionId")
-        if not sid:
-            return False
-        import urllib.request
-
-        home = Path.home()
-        token = json.loads((home / ".claude/.credentials.json").read_text())["claudeAiOauth"]["accessToken"]
-        org = json.loads((home / ".claude.json").read_text())["oauthAccount"]["organizationUuid"]
-        req = urllib.request.Request(
-            f"https://api.anthropic.com/v1/sessions/{sid}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": "ccr-byoc-2025-07-29",
-                "anthropic-version": "2023-06-01",
-                "x-organization-uuid": org,
-            },
-        )
-        meta = json.load(urllib.request.urlopen(req, timeout=10)).get("external_metadata") or {}
+        meta = _api("GET", f"/v1/sessions/{sid}").get("external_metadata") or {}
     except Exception:  # noqa: BLE001 - unknown means leave it alone
         return False
     stop = meta.get("archive_container_stop_pending_epoch")
@@ -413,6 +470,8 @@ def run(
     nudger=None,
     logger=None,
     archived=None,
+    archive=None,
+    wrapup_dir: Path | None = None,
 ) -> str:
     """Sweep every registry row once. Silent and near-free when nothing is due.
 
@@ -423,6 +482,8 @@ def run(
     settings = settings or config.REAPER
     nudger = nudger or _default_nudger
     archived = archived or archived_in_app
+    archive = archive or archive_in_app
+    wrapup_dir = wrapup_dir or WRAPUP_DIR
     if not settings.enabled:
         return "disabled"
 
@@ -465,6 +526,12 @@ def run(
             reaped += 1
             notable.append(f"  REAP {job_id}: archived in the app")
             continue
+
+        if job.get("wrapup_sent_at") and not job.get("wrapup"):
+            verdict = read_verdict(job_id, wrapup_dir)
+            if verdict:
+                job["wrapup"] = verdict
+                registry.upsert(job_id, registry_path, touch=False, wrapup=verdict)
 
         decision = decide(
             job,
@@ -512,11 +579,33 @@ def run(
             notable.append(f"  NUDGE {job_id}: {decision.why}")
             continue
 
+        if decision.action == "wrapup":
+            wrapup_dir.mkdir(parents=True, exist_ok=True)
+            problem = tmux.submit(
+                f"{config.TMUX_SESSION}:{window}",
+                WRAPUP_TEMPLATE.format(path=wrapup_dir / f"{job_id}.txt"),
+            )
+            if problem:
+                notable.append(f"  spare {job_id}: wrap-up not delivered ({problem})")
+                continue
+            registry.upsert(
+                job_id, registry_path, touch=False, wrapup_sent_at=now.isoformat(timespec="seconds")
+            )
+            notable.append(f"  WRAPUP {job_id}: {decision.why}")
+            continue
+
+        # Close first, archive second: a live window re-lists the chat the
+        # next time it reports in, a closed one cannot.
+        sid = bridge_id(pid) if decision.action == "close" else None
         tmux.kill_window(config.TMUX_SESSION, window)
         registry.upsert(job_id, registry_path, touch=False, status="reaped")
         fresh.pop(job_id, None)
         reaped += 1
-        notable.append(f"  REAP {job_id}: {decision.why}")
+        if decision.action == "close":
+            filed = "archived" if archive(sid) else "NOT archived — archive it by hand"
+            notable.append(f"  CLOSE {job_id}: {decision.why}; {filed}")
+        else:
+            notable.append(f"  REAP {job_id}: {decision.why}")
 
     save_state(
         {"cpu": fresh, "ranAt": now.isoformat(timespec="seconds")},
@@ -572,6 +661,12 @@ def report(*, now: datetime | None = None, registry_path: Path | None = None) ->
         if command and "claude" in command:
             pid = pane_pid(config.TMUX_SESSION, window)
             ticks = cpu_ticks(pid) if pid else None
+        if job.get("wrapup_sent_at") and not job.get("wrapup"):
+            verdict = read_verdict(job_id, wrapup_dir)
+            if verdict:
+                job["wrapup"] = verdict
+                registry.upsert(job_id, registry_path, touch=False, wrapup=verdict)
+
         decision = decide(
             job,
             now=now,

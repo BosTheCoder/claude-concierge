@@ -78,17 +78,20 @@ def test_an_idle_repl_is_not_mistaken_for_a_working_one(wrote_output):
     unchanged" test, which is never true of these panes — every job would have
     been spared forever while the reaper reported success.
     """
-    assert call(job(), rate=IDLE).action == "reap"
+    assert call(job(), rate=IDLE).action == "wrapup"
 
 
 def test_finished_job_with_no_previous_sample_is_spared(wrote_output):
     assert call(job(), rate=None).action == "spare"
 
 
-def test_job_that_wrote_nothing_is_spared(wrote_nothing):
-    decision = call(job())
-    assert decision.action == "spare"
-    assert "task folder" in decision.why
+def test_finished_job_is_closed_only_on_its_own_wrapup_verdict():
+    # Only the chat knows whether anything is left on his side.
+    asked = (NOW - timedelta(hours=1)).isoformat()
+    assert call(job()).action == "wrapup"
+    assert call(job(wrapup_sent_at=asked)).action == "spare"
+    assert call(job(wrapup_sent_at=asked, wrapup="keep: needs his answer")).action == "spare"
+    assert call(job(wrapup_sent_at=asked, wrapup="close")).action == "close"
 
 
 def test_pane_running_something_else_is_spared(wrote_output):
@@ -98,9 +101,6 @@ def test_pane_running_something_else_is_spared(wrote_output):
 # --- the job that should go --------------------------------------------------
 
 
-def test_finished_idle_job_with_output_is_reaped(wrote_output):
-    assert call(job()).action == "reap"
-
 
 def test_still_inside_the_grace_period_is_spared(wrote_output):
     # Comfortably inside the shipped default, which is 15 minutes and has been
@@ -109,10 +109,11 @@ def test_still_inside_the_grace_period_is_spared(wrote_output):
     assert call(fresh).action == "spare"
 
 
-def test_grace_period_is_configurable(wrote_output):
+def test_wrapup_waits_for_the_configured_idle_time():
     fresh = job(last_update=(NOW - timedelta(minutes=20)).isoformat())
-    impatient = ReaperSettings(finished_grace_minutes=5)
-    assert call(fresh, settings=impatient).action == "reap"
+    assert call(fresh).action == "spare"
+    impatient = ReaperSettings(finished_grace_minutes=5, wrapup_hours=0.25)
+    assert call(fresh, settings=impatient).action == "wrapup"
 
 
 def test_killed_job_window_goes_with_no_grace(wrote_output):
@@ -225,6 +226,11 @@ class FakeTmux:
     def __init__(self, commands: dict[str, str | None]):
         self.commands = commands
         self.killed: list[str] = []
+        self.submitted: list[tuple[str, str]] = []
+
+    def submit(self, pane, text):
+        self.submitted.append((pane, text))
+        return None
 
     def window_command(self, session, window):
         return self.commands.get(window)
@@ -369,8 +375,32 @@ def test_cpu_samples_carry_across_ticks(tmp_path, monkeypatch):
         tmux=tmux,
         logger=lambda *a: None,
     )
+    assert tmux.killed == []  # finished jobs are asked first, never just killed
+    assert tmux.submitted and "Concierge wrap-up" in tmux.submitted[0][1]
+
+
+def test_close_verdict_kills_the_window_then_archives_the_chat(tmp_path, monkeypatch):
+    monkeypatch.setattr(reaper, "pane_pid", lambda s, w, tmux=None: 4242)
+    monkeypatch.setattr(reaper, "cpu_ticks", lambda pid: 900)
+    monkeypatch.setattr(reaper, "bridge_id", lambda pid: "session_X")
+    state, wrapup, cpu = tmp_path / "jobs.json", tmp_path / "wrapup", tmp_path / "reaper.json"
+    asked = (NOW - timedelta(hours=1)).isoformat()
+    registry.save({"A3": job(wrapup_sent_at=asked)}, state)
+    wrapup.mkdir()
+    (wrapup / "A3.txt").write_text("CLOSE\n")
+    earlier = (NOW - timedelta(seconds=300)).isoformat()
+    cpu.write_text(json.dumps({"cpu": {"A3": 900 - 246}, "ranAt": earlier}))
+    tmux, archived = FakeTmux({"A3": "claude"}), []
+
+    reaper.run(
+        now=NOW, registry_path=state, cpu_path=cpu, tmux=tmux, logger=lambda *a: None,
+        archived=lambda j, pid: False, archive=lambda sid: archived.append(sid) or True,
+        wrapup_dir=wrapup,
+    )
+
     assert tmux.killed == ["A3"]
-    assert second.startswith("reaped:1")
+    assert archived == ["session_X"]
+    assert registry.load(state)["A3"]["status"] == "reaped"
 
 
 def test_a_job_working_between_ticks_survives_the_sweep(tmp_path, monkeypatch):
