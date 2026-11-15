@@ -97,6 +97,26 @@
   td:first-child, th:first-child { text-align:left; }
   .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:90px; background:#30363d; padding:8px 14px; border-radius:8px; font-size:14px; z-index:9; }
   textarea.capture { width:100%; min-height:40vh; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; }
+
+  /* Desktop: use the width. Home: search and filters become a sticky left sidebar, threads a grid of cards.
+     A thread: what he reads on the left, its facts in a right column. Settings in two columns. */
+  @media (min-width:1100px) {
+    main { max-width:1440px; padding:20px 28px 110px; }
+    main:has(> .side) { display:grid; grid-template-columns:260px minmax(0,1fr); column-gap:36px; align-items:start; }
+    .side { grid-column:1; grid-row:1 / span 2; position:sticky; top:76px; }
+    .side .chips { flex-wrap:wrap; overflow:visible; padding-bottom:12px; }
+    .list, main:has(> .side) > p { grid-column:2; }
+    .list { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:14px; }
+    .list > .brief, .list > p { grid-column:1 / -1; margin:0; }
+    .list > .row { margin:0; }
+    main:has(> .menu) { display:grid; grid-template-columns:minmax(0,1fr) 380px; column-gap:32px; align-items:start; }
+    main:has(> .menu) > * { grid-column:1; }
+    main:has(> .menu) > .facts { grid-column:2; grid-row:1; }
+    main:has(#barcfg) { columns:2; column-gap:48px; }
+    main:has(#barcfg) h2, #rules { break-after:avoid; }
+    main:has(#barcfg) .sheet, main:has(#barcfg) table, #barcfg { break-inside:avoid; }
+    main:has(> #cap) { max-width:900px; }
+  }
 </style>
 </head>
 <body>
@@ -138,14 +158,14 @@ async function home(quiet) {
   const focused = document.activeElement && document.activeElement.id === "q";
   if (quiet && focused) return;  // don't redraw under his typing
   $("#main").innerHTML = `
-    <input class="search" id="q" placeholder="Search threads, open and closed" value="${esc(homeQ)}">
+    <div class="side"><input class="search" id="q" placeholder="Search threads, open and closed" value="${esc(homeQ)}">
     <div class="chips">${chips("need", ["all","decision","reply","nothing"], {decision:"Decision", reply:"Reply", nothing:"FYI"})}</div>
-    <div class="chips">${chips("urg", ["all","critical","urgent","needs","fyi"], LVNAME)}</div>
-    ${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
+    <div class="chips">${chips("urg", ["all","critical","urgent","needs","fyi"], LVNAME)}</div></div>
+    <div class="list">${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
     ${rows.map(t => `<a class="row ${t.urgency}" href="#t=${t.id}">
         <div class="t"><span>${esc(t.title)}</span><span class="age">${age(t.updated)}</span></div>
         <div class="need ${t.needs}">${t.status === "closed" ? "Closed" : NEED[t.needs]}${t.urgency !== "fyi" && t.needs !== "nothing" ? " · " + LVNAME[t.urgency] : ""}${t.floor ? " · turned down" : ""}</div>
-        <div class="last">${t.last_author === "me" ? "You: " : ""}${esc(t.last)}</div></a>`).join("") || `<p class="muted">Nothing here.</p>`}
+        <div class="last">${t.last_author === "me" ? "You: " : ""}${esc(t.last)}</div></a>`).join("") || `<p class="muted">Nothing here.</p>`}</div>
     <p><button class="btn ghost" id="closed">${showClosed ? "Open threads" : "Closed threads"}</button></p>
     <button class="fab" id="fab" title="New thread">+</button>`;
   $("#main").querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter[b.dataset.f] = b.dataset.v; home(); });
