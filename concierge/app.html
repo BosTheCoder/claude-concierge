@@ -63,6 +63,15 @@
   .composer { position:fixed; left:0; right:0; bottom:var(--appbar, 0px); background:var(--bg); border-top:1px solid var(--line);
     padding:8px 10px calc(env(safe-area-inset-bottom) + 8px); display:flex; gap:8px; }
   .composer textarea { flex:1; resize:none; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:9px 12px; max-height:140px; }
+  .barlist { list-style:none; margin:8px 0; padding:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--card) }
+  .barlist li { display:flex; align-items:center; gap:10px; padding:6px 6px 6px 12px; border-top:1px solid var(--line); min-height:44px }
+  .barlist li:first-child { border-top:0 }
+  .barlist li b { width:24px; text-align:center; font-size:20px; font-weight:400 }
+  .barlist li span { flex:1 }
+  .barlist li.more { background:var(--bg); color:var(--dim); font-size:13px; min-height:30px; padding:4px 12px; text-transform:uppercase; letter-spacing:.06em }
+  .barlist button, .stepper button { min-width:44px; min-height:40px; background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:10px; font-size:18px; cursor:pointer }
+  .barlist button:disabled, .stepper button:disabled { opacity:.3; cursor:default }
+  .stepper { display:flex; align-items:center; gap:12px } .stepper output { min-width:1.5em; text-align:center; font-size:18px; font-weight:600 }
   .btn { background:var(--blue); color:#0e1116; border:0; border-radius:10px; padding:9px 14px; font-weight:600; cursor:pointer; }
   .btn.ghost { background:var(--card); color:var(--ink); border:1px solid var(--line); font-weight:400; }
   .btn:disabled { opacity:.5; }
@@ -266,6 +275,7 @@ async function settings() {
       <label><input type="checkbox" class="m_on" ${m.enabled !== 0 ? "checked" : ""}> On</label>
       <p><button class="btn m_save">Save</button> ${m.id ? `<button class="btn ghost m_del">Delete</button>` : ""}</p></div>`;
   $("#main").innerHTML = `
+    <h2>Bottom bar</h2><div id="barcfg"></div>
     <h2>Global decision rules</h2><p class="muted">Every decision Claude takes follows these, plus the thread's own spec.</p>
     <textarea id="rules" class="capture" style="min-height:8em">${esc(s.rules)}</textarea><p><button class="btn" id="saverules">Save rules</button></p>
     <h2>Delegations in force</h2>${s.delegations.map(d => `<div class="sheet"><b>${d.thread ? esc(d.title || "thread " + d.thread) : "All threads"}</b>${d.kind ? ` · ${esc(d.kind)}` : ""}${d.until ? ` · until ${esc(new Date(d.until).toLocaleString())}` : ""}
@@ -274,10 +284,40 @@ async function settings() {
     ${s.modes.map(modeRow).join("")}<button class="btn ghost" id="addmode">Add a mode</button>
     <h2>Alerts per week</h2><table><tr><th>Week</th>${LV.map(l => `<th>${LVNAME[l]}</th>`).join("")}</tr>
       ${s.stats.map(w => `<tr><td>${esc(w.week)}</td>${LV.map(l => `<td>${w[l]}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="5" class="muted">No messages yet</td></tr>`}</table>`;
+  barSettings();
   $("#saverules").onclick = async () => { await api("settings/rules", {rules: $("#rules").value}); toast("Saved"); };
   $("#main").querySelectorAll("[data-end]").forEach(b => b.onclick = async () => { await api("delegations/end", {id:+b.dataset.end}); settings(); });
   $("#addmode").onclick = () => { $("#addmode").insertAdjacentHTML("beforebegin", modeRow({allow:["critical"], start_day:4, end_day:5})); wireModes(); };
   wireModes();
+}
+// The phone's bottom bar: which panes sit in it, in what order. appbar.js owns the panes and saving.
+async function barSettings() {
+  const box = $("#barcfg");
+  if (!window.appbar && document.readyState === "loading") await new Promise(r => addEventListener("DOMContentLoaded", r, {once: true}));
+  if (!window.appbar) { box.innerHTML = `<p class="muted">Open the app from its main address to set this.</p>`; return; }
+  let {panes, main} = window.appbar.layout();
+  const draw = () => {
+    const row = (p, i) => `<li><b aria-hidden="true">${p.icon}</b><span>${esc(p.name)}</span>
+      <button data-up="${i}" ${i ? "" : "disabled"} aria-label="Move ${esc(p.name)} up">↑</button>
+      <button data-down="${i}" ${i < panes.length - 1 ? "" : "disabled"} aria-label="Move ${esc(p.name)} down">↓</button></li>`;
+    const items = panes.map(row);
+    if (panes.length > main + 1) items.splice(main, 0, `<li class="more" aria-hidden="true">⋯ Under More</li>`);
+    box.innerHTML = `<p class="muted">The top ones sit in the bar; the rest open from More.</p>
+      <div class="stepper"><span>In the bar</span><button id="barless" aria-label="Fewer in the bar" ${main > 1 ? "" : "disabled"}>−</button>
+        <output>${main}</output><button id="barmore" aria-label="More in the bar" ${main < Math.min(6, panes.length) ? "" : "disabled"}>+</button></div>
+      <ul class="barlist">${items.join("")}</ul><p><button class="btn" id="savebar">Save bar</button></p>`;
+    box.querySelectorAll("[data-up],[data-down]").forEach(b => b.onclick = () => {
+      const i = +(b.dataset.up ?? b.dataset.down), j = b.dataset.up !== undefined ? i - 1 : i + 1;
+      [panes[i], panes[j]] = [panes[j], panes[i]]; draw();
+      box.querySelector(`[data-${b.dataset.up !== undefined ? "up" : "down"}="${j}"]`)?.focus();
+    });
+    $("#barless").onclick = () => { main--; draw(); };
+    $("#barmore").onclick = () => { main++; draw(); };
+    $("#savebar").onclick = async () => {
+      try { await window.appbar.save({order: panes.map(p => p.id), main}); toast("Saved"); } catch (e) { toast(e.message); }
+    };
+  };
+  draw();
 }
 function wireModes() {
   document.querySelectorAll("[data-mode]").forEach(el => {

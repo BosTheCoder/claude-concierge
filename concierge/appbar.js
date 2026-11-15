@@ -4,22 +4,43 @@
 // Fixed-bottom things on a page sit above the bar with bottom: calc(var(--appbar, 0px) + ...).
 (() => {
   if (location.port || document.getElementById("appbar")) return;  // :18787 etc. are other addresses
+  // Every pane, by id. Which sit in the bar, in what order, is his: Concierge → Settings → Bottom bar
+  // saves {order, main} to the concierge (kv "appbar"); this page keeps a copy so the bar draws at once.
   const PANES = [
-    // The first MAIN sit in the bar; the rest open from More as a sheet (a bar of 8 is too
-    // cramped on a phone, and a scrolling bar hides what's off the edge).
-    ["/claude/app", "✦", "Concierge"], ["/claude/tasks", "☑", "Tasks"], ["/inbox/", "✉", "Inbox"],
-    // Plannotator Inbox: its own address (port 45581, owner-only), so the bar isn't on its page.
-    [`https://${location.hostname}:45581/`, "✎", "Review"],
-    ["/brief/", "☀", "Brief"], ["/money/", "£", "Money"],
+    {id: "concierge", href: "/claude/app", icon: "✦", name: "Concierge"},
+    {id: "tasks", href: "/claude/tasks", icon: "☑", name: "Tasks"},
+    {id: "inbox", href: "/inbox/", icon: "✉", name: "Inbox"},
+    // Plannotator Inbox, framed so it stays in the app (it lives on :45581, owner-only).
+    {id: "review", href: "/claude/review", icon: "✎", name: "Review"},
+    {id: "brief", href: "/brief/", icon: "☀", name: "Brief"},
+    {id: "money", href: "/money/", icon: "£", name: "Money"},
     // The vault browser's viewer, proxied by the concierge so it opens inside the app.
     // Its controls (restart, tabs) are on the Apps page and the icon's long-press menu.
-    ["/claude/vault/", "◳", "Browser"],
-    ["/", "⌂", "Apps"],  // the tailnet home page: every app he has
+    {id: "browser", href: "/claude/vault/", icon: "◳", name: "Browser"},
+    {id: "apps", href: "/", icon: "⌂", name: "Apps"},  // the tailnet home page: every app he has
   ];
-  const MAIN = 4;
+  const DEFAULT = {order: PANES.map(p => p.id), main: 4};
+  const KEY = "appbar-layout", API = "/claude/api/settings/appbar";
+  // Saved order first, then any pane added since (it lands at the end, under More).
+  const arrange = cfg => {
+    const byId = Object.fromEntries(PANES.map(p => [p.id, p]));
+    const order = [...new Set([...(cfg.order || []).filter(id => byId[id]), ...PANES.map(p => p.id)])];
+    return {panes: order.map(id => byId[id]), main: Math.min(Math.max(+cfg.main || DEFAULT.main, 1), 6)};
+  };
+  const cached = () => { try { return JSON.parse(localStorage.getItem(KEY)) || DEFAULT; } catch { return DEFAULT; } };
+  const remember = cfg => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch {} };
+  // For the settings page: the catalogue, the layout in force, and saving a new one.
+  window.appbar = {
+    panes: PANES, layout: () => arrange(cached()),
+    async save(cfg) {
+      const r = await fetch(API, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cfg)});
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      remember(cfg); render(arrange(cfg));
+    },
+  };
   const wanted = () => matchMedia("(display-mode: standalone)").matches || innerWidth < 700;
   const trim = s => s.replace(/\/$/, ""), path = trim(location.pathname);
-  const here = PANES.find(([p]) => p === "/" ? path === "" : p.startsWith("/") && (path === trim(p) || path.startsWith(trim(p) + "/")));
+  const here = PANES.find(({href: p}) => p === "/" ? path === "" : path === trim(p) || path.startsWith(trim(p) + "/"));
   const css = document.createElement("style");
   css.textContent = `
     #appbar { position:fixed; left:0; right:0; bottom:0; z-index:2147483000; display:flex; justify-content:space-around;
@@ -57,21 +78,37 @@
   const nav = document.createElement("nav");
   nav.id = "appbar";
   nav.setAttribute("aria-label", "Apps");
-  const link_ = ([href, icon, name]) =>
-    `<a href="${href}"${here && here[0] === href ? ' aria-current="page"' : ""}><b aria-hidden="true">${icon}</b>${name}</a>`;
-  const rest = PANES.slice(MAIN), inRest = here && rest.includes(here);
-  nav.innerHTML = PANES.slice(0, MAIN).map(link_).join("") +
-    `<button type="button" aria-haspopup="true" aria-expanded="false" aria-controls="appbar-more"${inRest ? ' aria-current="page"' : ""}>` +
-    `<b aria-hidden="true">${inRest ? here[1] : "⋯"}</b>${inRest ? here[2] : "More"}</button>`;
+  const link_ = p => `<a href="${p.href}"${p === here ? ' aria-current="page"' : ""}><b aria-hidden="true">${p.icon}</b>${p.name}</a>`;
   // More: a sheet above the bar with the other panes, closed by a tap outside, Escape, or More again.
   const sheet = document.createElement("div"), scrim = document.createElement("div");
-  sheet.id = "appbar-more"; sheet.hidden = true; sheet.innerHTML = rest.map(link_).join("");
+  sheet.id = "appbar-more"; sheet.hidden = true;
   scrim.id = "appbar-scrim"; scrim.hidden = true;
-  const more = nav.querySelector("button");
-  const openMore = on => { sheet.hidden = scrim.hidden = !on; more.setAttribute("aria-expanded", String(on)); if (on) sheet.querySelector("a")?.focus(); };
-  more.addEventListener("click", () => openMore(sheet.hidden));
+  let more = null;
+  const openMore = on => {
+    if (!more) return;
+    sheet.hidden = scrim.hidden = !on; more.setAttribute("aria-expanded", String(on));
+    if (on) sheet.querySelector("a")?.focus();
+  };
+  const render = ({panes, main}) => {
+    const all = panes.length <= main + 1;  // one spare pane goes in the bar rather than behind More
+    const bar = all ? panes : panes.slice(0, main), rest = all ? [] : panes.slice(main);
+    const inRest = rest.includes(here);
+    nav.innerHTML = bar.map(link_).join("") + (rest.length ?
+      `<button type="button" aria-haspopup="true" aria-expanded="false" aria-controls="appbar-more"${inRest ? ' aria-current="page"' : ""}>` +
+      `<b aria-hidden="true">${inRest ? here.icon : "⋯"}</b>${inRest ? here.name : "More"}</button>` : "");
+    sheet.innerHTML = rest.map(link_).join("");
+    sheet.hidden = scrim.hidden = true;
+    more = nav.querySelector("button");
+    more?.addEventListener("click", () => openMore(sheet.hidden));
+  };
+  render(arrange(cached()));
+  // The concierge's copy wins: one layout on every device.
+  fetch(API).then(r => r.ok ? r.json() : null).then(cfg => {
+    if (!cfg || !cfg.order) return;
+    if (JSON.stringify(cfg) !== JSON.stringify(cached())) { remember(cfg); render(arrange(cfg)); }
+  }).catch(() => {});
   scrim.addEventListener("click", () => openMore(false));
-  addEventListener("keydown", e => { if (e.key === "Escape" && !sheet.hidden) { openMore(false); more.focus(); } });
+  addEventListener("keydown", e => { if (e.key === "Escape" && !sheet.hidden) { openMore(false); more?.focus(); } });
   addEventListener("pageshow", () => openMore(false));  // coming Back to a page leaves no sheet open
   const root = document.documentElement;
   // While he types the keyboard is up: the bar steps aside so it doesn't sit between the text and the keys.

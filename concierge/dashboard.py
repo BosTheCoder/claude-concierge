@@ -451,6 +451,9 @@ def handler_for(sampler: Sampler):
             if self._route() == "/tasks":
                 self._send(200, TASKS_HTML.read_bytes(), "text/html; charset=utf-8")
                 return
+            if self._route() in ("/review", "/review/"):
+                self._send(200, TASKS_HTML.with_name("review.html").read_bytes(), "text/html; charset=utf-8")
+                return
             if self._route() == "/appbar.js":
                 self._send(200, TASKS_HTML.with_name("appbar.js").read_bytes(), "text/javascript; charset=utf-8")
                 return

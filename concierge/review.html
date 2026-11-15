@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>Review</title>
+<!-- The Plannotator Inbox inside the one app. It lives on its own address (:45581, owner-only via
+     Tailscale), which an installed app would open in a browser sheet; framed here it stays in the app.
+     The plannotator-relay lets this origin, and only this one, frame it. -->
+<style>
+  html, body { margin:0; height:100%; background:#fff }
+  @media (prefers-color-scheme: dark) { html, body { background:#14161a } }
+  iframe { display:block; border:0; width:100%; height:calc(100dvh - var(--appbar, 0px)) }
+</style>
+<script src="/claude/appbar.js" defer></script>
+</head>
+<body>
+<iframe id="inbox" title="Plannotator Inbox" allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
+<script>
+  document.getElementById("inbox").src = `https://${location.hostname}:45581/${location.hash}`;
+</script>
+</body>
+</html>

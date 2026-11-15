@@ -81,6 +81,8 @@ def get(path: str, query: dict) -> tuple[int, dict]:
         if path.startswith("/api/alarms/"):
             row = db.execute("SELECT * FROM alarms WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
             return (200, {k: row[k] for k in ("id", "level", "title", "body", "open")}) if row else (404, {"error": "no"})
+        if path == "/api/settings/appbar":
+            return 200, json.loads(threads._kv(db, "appbar") or "{}")
         if path == "/api/settings":
             return 200, {"rules": threads._kv(db, "rules"),
                          "delegations": [dict(d) for d in db.execute(
@@ -141,6 +143,17 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
             else:
                 db.execute("INSERT INTO modes(name, allow, start_day, start_time, end_day, end_time, enabled) "
                            "VALUES (?,?,?,?,?,?,?)", fields)
+            return 200, {"ok": True}
+        if path == "/api/settings/appbar":
+            # The phone bar: pane ids in order (appbar.js owns the catalogue) and how many sit in
+            # the bar; the rest open from More.
+            order = body.get("order")
+            main = body.get("main")
+            if (not isinstance(order, list) or not 1 <= len(order) <= 30
+                    or not all(isinstance(i, str) and 0 < len(i) <= 40 for i in order)
+                    or not isinstance(main, int) or not 1 <= main <= 6):
+                return 400, {"ok": False, "error": "order: a list of pane ids; main: 1 to 6"}
+            threads._set_kv(db, "appbar", json.dumps({"order": list(dict.fromkeys(order)), "main": main}))
             return 200, {"ok": True}
         if path == "/api/settings/mode/delete":
             db.execute("DELETE FROM modes WHERE id=?", (int(body["id"]),))

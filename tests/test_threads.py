@@ -124,3 +124,13 @@ def test_the_app_api_refuses_a_bad_answer_and_serves_alarms(db, clock, monkeypat
     status, alarm = app_api.get("/api/alarms/" + alarms[0][1].rsplit("/", 1)[1], {})
     assert (status, alarm["level"], alarm["open"]) == (200, "urgent", f"https://box.example.ts.net/app#t={th['id']}")
     assert app_api.get("/api/alarms/nope", {})[0] == 404
+
+
+def test_the_bottom_bar_layout_round_trips_and_refuses_junk():
+    from concierge import app_api
+    assert app_api.get("/api/settings/appbar", {}) == (200, {})
+    assert app_api.post("/api/settings/appbar", {"order": ["review", "tasks", "review"], "main": 2})[0] == 200
+    assert app_api.get("/api/settings/appbar", {}) == (200, {"order": ["review", "tasks"], "main": 2})
+    for bad in ({"order": "tasks", "main": 2}, {"order": ["tasks"], "main": 9}, {"order": [], "main": 2}):
+        assert app_api.post("/api/settings/appbar", bad)[0] == 400
+    assert app_api.get("/api/settings/appbar", {})[1]["main"] == 2
