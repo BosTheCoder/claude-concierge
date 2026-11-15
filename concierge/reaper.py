@@ -364,6 +364,44 @@ def _default_nudger(job: dict, text: str) -> None:
     telegram.send(job["chat_id"], text, reply_to=job.get("root_message_id"))
 
 
+def archived_in_app(job: dict, pid: int | None) -> bool:
+    """Has he archived this window's chat in the Claude app?
+
+    pid -> ~/.claude/sessions/<pid>.json -> bridgeSessionId -> the same
+    sessions API the CLI uses (found in its bundle, not documented). The record
+    carries archive/unarchive epochs, not a status: archived while the stop
+    epoch is ahead of the unarchive one (seen on D9, 2026-11-15). Any failure
+    reads as "not archived", so this can only ever spare a window.
+    """
+    if not pid:
+        return False
+    try:
+        from concierge import rc
+
+        sid = json.loads((rc.SESSIONS_DIR / f"{pid}.json").read_text()).get("bridgeSessionId")
+        if not sid:
+            return False
+        import urllib.request
+
+        home = Path.home()
+        token = json.loads((home / ".claude/.credentials.json").read_text())["claudeAiOauth"]["accessToken"]
+        org = json.loads((home / ".claude.json").read_text())["oauthAccount"]["organizationUuid"]
+        req = urllib.request.Request(
+            f"https://api.anthropic.com/v1/sessions/{sid}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "anthropic-beta": "ccr-byoc-2025-07-29",
+                "anthropic-version": "2023-06-01",
+                "x-organization-uuid": org,
+            },
+        )
+        meta = json.load(urllib.request.urlopen(req, timeout=10)).get("external_metadata") or {}
+    except Exception:  # noqa: BLE001 - unknown means leave it alone
+        return False
+    stop = meta.get("archive_container_stop_pending_epoch")
+    return stop is not None and stop > (meta.get("unarchived_epoch") or 0)
+
+
 def run(
     *,
     now: datetime | None = None,
@@ -374,6 +412,7 @@ def run(
     settings=None,
     nudger=None,
     logger=None,
+    archived=None,
 ) -> str:
     """Sweep every registry row once. Silent and near-free when nothing is due.
 
@@ -383,6 +422,7 @@ def run(
     now = now or datetime.now(timezone.utc)
     settings = settings or config.REAPER
     nudger = nudger or _default_nudger
+    archived = archived or archived_in_app
     if not settings.enabled:
         return "disabled"
 
@@ -403,12 +443,28 @@ def run(
         window = job.get("tmux_window") or job_id
         command = tmux.window_command(config.TMUX_SESSION, window)
 
-        ticks = None
+        ticks = pid = None
         if command and "claude" in command:
             pid = pane_pid(config.TMUX_SESSION, window, tmux=tmux)
             ticks = cpu_ticks(pid) if pid else None
             if ticks is not None:
                 fresh[job_id] = ticks
+
+        # Archiving a chat in the app does not stop this window, and the next
+        # thing it reports (a new commit in its repo is enough) un-archives it.
+        # Archive is him saying "done", so it overrides the guards in `decide`.
+        if (
+            job.get("status") != "running"
+            and command
+            and "claude" in command
+            and archived(job, pid)
+        ):
+            tmux.kill_window(config.TMUX_SESSION, window)
+            registry.upsert(job_id, registry_path, touch=False, status="reaped")
+            fresh.pop(job_id, None)
+            reaped += 1
+            notable.append(f"  REAP {job_id}: archived in the app")
+            continue
 
         decision = decide(
             job,

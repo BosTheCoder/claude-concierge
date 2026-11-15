@@ -441,3 +441,31 @@ def test_the_nudge_does_not_reset_the_idle_clock(tmp_path):
     row = registry.load(state)["T7"]
     assert row["last_update"] == waited_since
     assert row["nudged_at"]
+
+
+def test_run_closes_a_chat_archived_in_the_app_even_when_guards_would_spare_it(
+    tmp_path, wrote_nothing
+):
+    # Archive leaves the window running, and its next report un-archives the
+    # chat. A finished job that wrote nothing is normally spared for 7 days.
+    state = tmp_path / "jobs.json"
+    registry.save(
+        {
+            "D9": job(id="D9", tmux_window="D9", status="done"),
+            "R1": job(id="R1", tmux_window="R1", status="running"),
+        },
+        state,
+    )
+    tmux = FakeTmux({"D9": "claude", "R1": "claude"})
+
+    reaper.run(
+        now=NOW,
+        registry_path=state,
+        cpu_path=tmp_path / "reaper.json",
+        tmux=tmux,
+        logger=lambda *a: None,
+        archived=lambda j, pid: True,
+    )
+
+    assert tmux.killed == ["D9"]  # a running job is never cut off mid-turn
+    assert registry.load(state)["D9"]["status"] == "reaped"
