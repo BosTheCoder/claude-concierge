@@ -7,16 +7,20 @@
   const PANES = [
     ["/claude/app", "✦", "Concierge"], ["/claude/tasks", "☑", "Tasks"], ["/brief/", "☀", "Brief"],
     ["/money/", "£", "Money"], ["/inbox/", "✉", "Inbox"],
+    // The vault browser lives on its own ports (its pages are built into its container), so in the
+    // installed app it opens over the app with a close bar. Its controls are on the Apps page.
+    [`https://${location.hostname}:16080/`, "◳", "Browser"],
+    ["/", "⋯", "Apps"],  // the tailnet home page: every app he has
   ];
   const wanted = () => matchMedia("(display-mode: standalone)").matches || innerWidth < 700;
   const trim = s => s.replace(/\/$/, ""), path = trim(location.pathname);
-  const here = PANES.find(([p]) => path === trim(p) || path.startsWith(trim(p) + "/"));
+  const here = PANES.find(([p]) => p === "/" ? path === "" : p.startsWith("/") && (path === trim(p) || path.startsWith(trim(p) + "/")));
   const css = document.createElement("style");
   css.textContent = `
     #appbar { position:fixed; left:0; right:0; bottom:0; z-index:2147483000; display:flex; justify-content:space-around;
       padding:4px 4px calc(env(safe-area-inset-bottom) + 4px); background:#14161a; border-top:1px solid #2c3038;
-      font:12px/1.2 system-ui, -apple-system, sans-serif }
-    #appbar a { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; min-height:48px; justify-content:center;
+      font:11px/1.2 system-ui, -apple-system, sans-serif }
+    #appbar a { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:flex; flex-direction:column; align-items:center; gap:2px; min-height:48px; justify-content:center;
       color:#9aa0a8; text-decoration:none; border-radius:12px }
     #appbar a b { font-size:20px; font-weight:400; line-height:1 }
     #appbar a[aria-current=page] { color:#8ab4f8; font-weight:600 }

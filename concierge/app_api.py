@@ -26,7 +26,8 @@ def manifest(prefix: str = "") -> str:
     shortcuts = [{"name": "New thread", "url": f"{prefix}/app#new"}]
     if prefix:  # long-press the icon: straight to a pane
         shortcuts += [{"name": n, "url": u} for n, u in
-                      (("Tasks", "/claude/tasks"), ("Brief", "/brief/"), ("Money", "/money/"))]
+                      (("Tasks", "/claude/tasks"), ("Brief", "/brief/"),
+                       ("Browser controls", "https://bos-desktop.fish-grouper.ts.net:16081/"))]
     return json.dumps({
         "id": f"{prefix}/app", "name": "Concierge", "short_name": "Concierge", "start_url": f"{prefix}/app", "scope": "/",
         "display": "standalone", "background_color": "#0e1116", "theme_color": "#0e1116",
