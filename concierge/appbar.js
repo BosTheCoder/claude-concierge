@@ -51,15 +51,19 @@
     const on = wanted() && !typing(), h = `${nav.offsetHeight || 60}px`;
     root.classList.toggle("appbar-off", !on);
     root.classList.toggle("appbar-tucked", on && tucked);
-    root.style.setProperty("--appbar-room", on ? h : "0px");  // page end stays clear of it
+    root.style.setProperty("--appbar-room", on && !tucked ? h : "0px");  // page end stays clear of it
     root.style.setProperty("--appbar", on && !tucked ? h : "0px");  // what fixed things sit on
   };
+  // Only his own scrolling counts: a page jumping to its newest message on open (Inbox) must not hide it.
+  let touched = 0;
+  for (const ev of ["touchmove", "wheel", "keydown"]) addEventListener(ev, () => { touched = Date.now(); }, {capture: true, passive: true});
   const lastY = new WeakMap();
   document.addEventListener("scroll", e => {
     const el = e.target === document ? document.scrollingElement : e.target;
     if (!el || el.scrollHeight - el.clientHeight < 200) return;  // a short list isn't worth hiding for
     const y = el.scrollTop, prev = lastY.has(el) ? lastY.get(el) : 0;
     lastY.set(el, y);
+    if (Date.now() - touched > 800) return;
     if (Math.abs(y - prev) < 6) return;
     const want = y > prev && y > 60;
     if (want !== tucked) { tucked = want; update(); }
