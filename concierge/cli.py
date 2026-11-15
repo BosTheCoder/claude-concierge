@@ -653,6 +653,7 @@ def post_cmd(
         th = _open_thread(db, thread)
         threads.post(db, th, text, urgency=urgency)
     typer.echo(f"posted to thread {th['id']}")
+    _nudge_summary(th)
 
 
 @app.command("ask")
@@ -670,6 +671,7 @@ def ask_cmd(
         th = _open_thread(db, thread)
         mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend)
     typer.echo(f"asked in thread {th['id']} (decision {mid}); his answer arrives as a message")
+    _nudge_summary(th)
 
 
 @app.command("facts")
@@ -688,7 +690,27 @@ def facts_cmd(
         facts[k.strip()] = v.strip()
     with threads.connect() as db:
         th = _open_thread(db, thread)
-        typer.echo(json.dumps(threads.set_facts(db, th["id"], facts), ensure_ascii=False))
+        try:
+            typer.echo(json.dumps(threads.set_facts(db, th["id"], facts), ensure_ascii=False))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("summary")
+def summary_cmd(text: str, thread: str = typer.Option(None)):
+    """Replace your thread's summary: the first thing he reads when he opens it."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        threads.set_summary(db, th["id"], text)
+    typer.echo(f"summary set on thread {th['id']}")
+
+
+def _nudge_summary(th) -> None:
+    if not th["summary"]:
+        typer.echo("This thread has no summary yet. He reads the summary first and the history only if he "
+                   "wants it: set one with `concierge summary \"<what this is, where it stands, what's next>\"`.")
 
 
 @app.command("close")

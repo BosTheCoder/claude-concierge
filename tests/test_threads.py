@@ -134,3 +134,16 @@ def test_the_bottom_bar_layout_round_trips_and_refuses_junk():
     for bad in ({"order": "tasks", "main": 2}, {"order": ["tasks"], "main": 9}, {"order": [], "main": 2}):
         assert app_api.post("/api/settings/appbar", bad)[0] == 400
     assert app_api.get("/api/settings/appbar", {})[1]["main"] == 2
+
+
+def test_thread_opens_on_summary_with_the_same_fact_rows_everywhere(db, clock):
+    th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
+    db.execute("UPDATE threads SET facts=? WHERE id=?", ('{"D05": "fan", "Money": "£400"}', th["id"]))
+    with pytest.raises(ValueError, match="Waiting on"):
+        threads.set_facts(db, th["id"], {"Shortlist": "x"})
+    threads.set_facts(db, th["id"], {"Due": "31 Dec", "Next": "pick a firm"})
+    threads.set_summary(db, th["id"], "Three prices in; waiting on two more.")
+    d = threads.detail(db, th["id"])
+    assert d["summary"] == "Three prices in; waiting on two more."
+    assert list(d["facts"]) == ["Next", "Due", "Money"]  # FACT_KEYS order, whatever order they were set in
+    assert d["other_facts"] == {"D05": "fan"}

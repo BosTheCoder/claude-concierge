@@ -30,6 +30,9 @@ DB_FILE = config.REPO / "state" / "threads.db"
 LONDON = ZoneInfo("Europe/London")
 LEVELS = ("fyi", "needs", "urgent", "critical")
 QUIET_DAYS = 3
+# The facts card has the same rows on every thread, in this order. A job that wants
+# another row is told these; anything else belongs in the summary.
+FACT_KEYS = ("Next", "Waiting on", "Due", "Money", "Who", "Decided", "Link")
 NTFY = "https://ntfy.sh/"
 
 SCHEMA = """
@@ -76,6 +79,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
+    if "summary" not in {c["name"] for c in db.execute("PRAGMA table_info(threads)")}:
+        db.execute("ALTER TABLE threads ADD COLUMN summary TEXT")
     if not db.execute("SELECT 1 FROM modes LIMIT 1").fetchone() and not _kv(db, "modes_seeded"):
         for name, allow, sd, st, ed, et in DEFAULT_MODES:
             db.execute("INSERT INTO modes(name, allow, start_day, start_time, end_day, end_time) VALUES (?,?,?,?,?,?)",
@@ -242,11 +247,20 @@ def post(db, thread: sqlite3.Row, text: str, *, author: str = "job", urgency: st
 
 
 def set_facts(db, thread_id: int, facts: dict) -> dict:
+    bad = [k for k in facts if k not in FACT_KEYS]
+    if bad:
+        raise ValueError(f"not a fact row: {', '.join(bad)}. Rows are: {', '.join(FACT_KEYS)}. "
+                         "Anything else goes in the summary (`concierge summary`).")
     row = db.execute("SELECT facts FROM threads WHERE id=?", (thread_id,)).fetchone()
     merged = {**json.loads(row["facts"]), **facts}
     merged = {k: v for k, v in merged.items() if v not in (None, "")}
     db.execute("UPDATE threads SET facts=?, updated=? WHERE id=?", (json.dumps(merged), _iso(now()), thread_id))
     return merged
+
+
+def set_summary(db, thread_id: int, text: str) -> None:
+    """What he reads first: what this is, where it stands, what happens next."""
+    db.execute("UPDATE threads SET summary=?, updated=? WHERE id=?", (text.strip() or None, _iso(now()), thread_id))
 
 
 def close(db, thread_id: int) -> None:
@@ -426,7 +440,11 @@ def detail(db, thread_id: int) -> dict:
     msgs = [dict(m) | {"options": json.loads(m["options"]) if m["options"] else None}
             for m in db.execute("SELECT * FROM messages WHERE thread=? ORDER BY id", (thread_id,))]
     d = delegation_for(db, thread_id)
-    return {**summary(db, row), "facts": json.loads(row["facts"]), "messages": msgs,
+    facts = json.loads(row["facts"])
+    return {**summary(db, row), "summary": row["summary"],
+            # Standard rows first, in order; rows set before FACT_KEYS existed come after.
+            "facts": {k: facts[k] for k in FACT_KEYS if k in facts},
+            "other_facts": {k: v for k, v in facts.items() if k not in FACT_KEYS}, "messages": msgs,
             "delegation": dict(d) if d else None}
 
 

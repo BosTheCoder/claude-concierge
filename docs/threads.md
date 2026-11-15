@@ -1,7 +1,9 @@
 # Threads: the Concierge app
 
 `<base_url>/app` (an installable page on the dashboard). One thread per specific
-thing, a key-facts card on top, decisions as buttons, and alerts by urgency.
+thing. Opening one shows the job's summary, any open decision as buttons, and a
+key-facts card with the same rows everywhere (Next, Waiting on, Due, Money, Who,
+Decided, Link); the message history is folded below. Alerts by urgency.
 Spec: https://claude.ai/artifact/5rUz9w4esiwr1D6eddcmLT
 
 ## How a session talks to him
@@ -9,7 +11,8 @@ Spec: https://claude.ai/artifact/5rUz9w4esiwr1D6eddcmLT
 ```
 concierge post "<text>" [--urgency fyi|needs|urgent|critical] [--thread <id|title>] [--file f]
 concierge ask "<question>" --option A --option B [--recommend A]
-concierge facts "Money=£400" "Who=Drury's"
+concierge summary "<what this is, where it stands, what's next>"
+concierge facts "Money=£400" "Who=Drury's"   # rows: threads.FACT_KEYS
 concierge close --note "<outcome>"
 concierge rules                     # his global rules + delegations in force
 concierge decided "<q>" "<choice>" --rule "<rule>"   # refused without a delegation

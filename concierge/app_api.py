@@ -109,7 +109,7 @@ def start_thread(db, text: str, *, spawner=None, lock=None) -> dict:
     title = " ".join(text.split())[:60] or "New thread"
     brief_text = (f"Started from Kelvin's Concierge app. His message:\n<<<\n{text}\n>>>\n\n"
                   "Talk to him only through your thread: `concierge post`, `concierge ask` for decisions, "
-                  "`concierge facts` for the key facts, `concierge close` when it's done.")
+                  "`concierge summary` for what he reads first, `concierge facts` for the key facts, `concierge close` when it's done.")
     chat = registry.last_chat() or ""
     with lock or threading.Lock():
         job = (spawner or spawn.spawn_job)(title=title, brief=brief_text, cwd=str(config.SETTINGS.default_repo.path),

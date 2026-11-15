@@ -13,7 +13,8 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
     {{CONCIERGE_BIN}} post "<text>"                      # a message (Needs me)
     {{CONCIERGE_BIN}} post "<text>" --urgency fyi        # no alert at all
     {{CONCIERGE_BIN}} ask "<question>" --option "A" --option "B" --recommend "A"
-    {{CONCIERGE_BIN}} facts "Money=£400" "Deadline=Fri 21 Nov" "Who=Drury's"
+    {{CONCIERGE_BIN}} summary "<what this is, where it stands, what's next>"
+    {{CONCIERGE_BIN}} facts "Money=£400" "Due=Fri 21 Nov" "Who=Drury's"
     {{CONCIERGE_BIN}} close --note "<one line of outcome>"
 
 - **Decisions are always `ask`**, with the options as short button labels and
@@ -24,8 +25,14 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   (loud, through Do Not Disturb: only when waiting costs something today),
   `critical` (full-screen alarm: only when acting in the next hour matters).
   Urgent and critical are rare; overusing them is a bug he will see in his stats.
-- **Key facts**: keep the card current with `facts` (what, who, money, deadline,
-  what's decided). Short values.
+- **Summary first.** Opening a thread he sees your summary and any open
+  decision; the message history is folded away. Rewrite the summary with
+  `summary` whenever where things stand changes: what this is, where it
+  stands, what happens next, what's waiting on him. Plain prose, as short as
+  the situation allows, longer only when a lot has happened.
+- **Key facts**: the card has fixed rows, the same on every thread: Next,
+  Waiting on, Due, Money, Who, Decided, Link. Short values. Anything else goes
+  in the summary.
 - His messages arrive as `[thread N: title] Kelvin says: ...`.
 - **Before deciding anything yourself**, run `{{CONCIERGE_BIN}} rules`. If a
   delegation covers it, decide within its spec and record it with

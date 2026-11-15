@@ -45,6 +45,11 @@
   .muted { color:var(--dim); font-size:14px; }
   .facts { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; font-size:14px; }
   .facts div { display:flex; gap:8px; } .facts b { color:var(--dim); font-weight:500; min-width:84px; }
+  .summary { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px;
+    white-space:pre-wrap; overflow-wrap:anywhere; }
+  .summary .who, .ask .who { font-size:12px; color:var(--dim); margin-bottom:4px; }
+  .ask { border:1px solid var(--amber); border-radius:10px; padding:10px 12px; margin-bottom:10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  details.hist { margin:14px 0; } details.hist summary { color:var(--dim); cursor:pointer; padding:8px 0; }
   .msg { max-width:88%; margin:8px 0; padding:8px 11px; border-radius:12px; background:var(--card); border:1px solid var(--line);
     white-space:pre-wrap; overflow-wrap:anywhere; }
   .msg.me { margin-left:auto; background:var(--me); border-color:#2b4c78; }
@@ -143,27 +148,45 @@ async function home(quiet) {
 }
 
 // --- a thread ---------------------------------------------------------------------------
-let current = null, lastSig = "";
+let current = null, lastSig = "", histOpen = false;
 async function thread(id, quiet) {
   let t;
   try { t = await api(`threads/${id}`); } catch (e) { $("#main").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
-  const sig = JSON.stringify([t.messages, t.facts, t.status, t.floor, t.delegation]);
+  const sig = JSON.stringify([t.messages, t.facts, t.summary, t.status, t.floor, t.delegation]);
   if (quiet && sig === lastSig) return;
+  if (!current || current.id !== t.id) histOpen = false;
   lastSig = sig; current = t;
   head(t.title, true);
-  const facts = Object.entries(t.facts || {});
+  const rows = facts => Object.entries(facts || {}).map(([k, v]) => `<div><b>${esc(k)}</b><span>${linkify(v)}</span></div>`).join("");
   const draft = $("#say") ? $("#say").value : "";
-  const atBottom = innerHeight + scrollY >= document.body.scrollHeight - 80;
+  // What he reads first: the summary (or, until a job writes one, its latest word) and what's waiting on him.
+  // The rest is history, folded away.
+  const ms = t.messages;
+  const open = ms.filter(m => m.options && (m.answer === null || m.answer === undefined));
+  const lastJob = [...ms].reverse().find(m => m.author !== "me" && m.author !== "app");
+  const lastJobIdx = lastJob ? ms.lastIndexOf(lastJob) : -1;
+  const mine = ms.filter((m, i) => m.author === "me" && i > lastJobIdx);  // his, not answered yet: delivery state matters
+  const shown = new Set([...open, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
+  const past = ms.filter(m => !shown.has(m));
+  const top = t.summary
+    ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>`
+    : lastJob && !lastJob.options ? `<div class="summary"><div class="who">Latest from Claude · ${age(lastJob.created)}</div>${linkify(lastJob.text)}</div>` : "";
+  const other = rows(t.other_facts);
   $("#main").innerHTML = `
+    ${top}
+    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}</div>${linkify(m.text)}${opts(m)}</div>`).join("")}
+    ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
+    ${mine.map(msg).join("")}
+    ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}
+    ${past.length || other ? `<details class="hist" id="hist" ${histOpen ? "open" : ""}><summary>History · ${past.length} message${past.length === 1 ? "" : "s"}</summary>
+      ${other ? `<div class="facts">${other}</div>` : ""}${past.map(msg).join("")}</details>` : ""}
     <div class="menu">
       <button class="btn ghost" id="floor">${t.floor ? "Turn back up" : "Turn down to FYI"}</button>
       <button class="btn ghost" id="openclose">${t.status === "closed" ? "Reopen" : "Close"}</button>
       <button class="btn ghost" id="deleg">${t.delegation ? "Delegated to Claude" : "Hand decisions to Claude"}</button>
     </div>
-    <div id="sheet"></div>
-    ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div><b>${esc(k)}</b><span>${linkify(v)}</span></div>`).join("")}</div>` : ""}
-    ${t.messages.map(msg).join("")}
-    ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}`;
+    <div id="sheet"></div>`;
+  if ($("#hist")) $("#hist").ontoggle = e => histOpen = e.target.open;
   if (!$(".composer")) document.body.insertAdjacentHTML("beforeend",
     `<div class="composer"><textarea id="say" rows="1" placeholder="Message"></textarea><button class="btn" id="send">Send</button></div>`);
   $("#say").value = draft;
@@ -173,23 +196,21 @@ async function thread(id, quiet) {
   $("#deleg").onclick = () => delegForm(t);
   $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
-  if (!quiet || atBottom) scrollTo(0, document.body.scrollHeight);
+  if (!quiet) scrollTo(0, 0);
   poll(() => thread(id, true), 3000);
+}
+function opts(m) {
+  if (!m.options) return "";
+  if (m.answer !== null && m.answer !== undefined)
+    return m.answered_by === "claude"
+      ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
+      : `<div class="answered">You chose “${esc(m.answer)}”</div>`;
+  return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
 }
 function msg(m) {
   const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
   const states = {sent:"✓ sent", picked:"✓✓ picked up", acted:"✓✓ acted on", failed:"⚠ not delivered: " + (m.error || "")};
-  let opts = "";
-  if (m.options) {
-    if (m.answer !== null && m.answer !== undefined) {
-      opts = m.answered_by === "claude"
-        ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
-        : `<div class="answered">You chose “${esc(m.answer)}”</div>`;
-    } else {
-      opts = `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
-    }
-  }
-  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${opts}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
+  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
 }
 async function act(action, body) {
   try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }
