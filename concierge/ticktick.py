@@ -17,7 +17,7 @@ CACHE_SECONDS = 600
 _state: dict = {"error": None, "failed_at": 0.0}
 _refreshing = threading.Lock()
 KEEP = ("id", "projectId", "title", "dueDate", "isAllDay", "timeZone", "priority", "tags", "parentId", "kind",
-        "etag", "repeatFlag", "status", "modifiedTime", "createdTime")
+        "etag", "repeatFlag", "status", "modifiedTime", "createdTime", "listColor")
 
 
 def _slim(t: dict, list_name: str | None = None) -> dict:

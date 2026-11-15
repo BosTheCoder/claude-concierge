@@ -35,8 +35,11 @@
   .head > button[data-toggle] { all:unset; box-sizing:border-box; display:flex; gap:10px; flex:1; min-width:0; padding:12px 14px; cursor:pointer; align-items:flex-start }
   .head > button[data-toggle]:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
   .t.sub { margin-left:20px }
-  .p { flex:none; width:4px; align-self:stretch; border-radius:2px; background:var(--line) }
-  .p5 { background:var(--red) } .p3 { background:var(--orange) } .p1 { background:var(--blue) }
+  .t { border-left:4px solid var(--lc, var(--line)) }  /* the task's list colour, as in TickTick */
+  .head .p { flex:none; width:18px; height:18px; margin-top:2px; border-radius:5px; border:2px solid var(--mute) }
+  .head .p5 { border-color:var(--red) } .head .p3 { border-color:var(--orange) } .head .p1 { border-color:var(--blue) }
+  .grp { font-size:15px; margin:18px 0 4px; display:flex; gap:8px; align-items:baseline }
+  .grp .n { color:var(--mute); font-weight:400; font-size:13px }
   .ti { flex:1; min-width:0; overflow-wrap:anywhere }
   .meta { display:block; font-size:13px; color:var(--mute); margin-top:2px }
   .meta .late { color:var(--red) }
@@ -141,8 +144,14 @@ function visible() {
   if (view === "chats") return withKids(Object.entries(chats).map(([id, c]) => byId[id] || {id, title: c.title, closed: true}));
   // Like TickTick: a subtask of a matching task sits under it (unfold the task to see it), not on its own.
   const hit = views[view] ? search(views[view]) : [], ids = new Set(hit.map(t => t.id));
-  return withKids(hit.filter(t => !ids.has(t.parentId)).sort(byPriority));
+  const top = hit.filter(t => !ids.has(t.parentId));
+  return PRIORITIES.flatMap(([p, name]) => {  // grouped under High / Medium / Low / None, like TickTick
+    const g = top.filter(t => (t.priority || 0) === p).sort(byPriority);
+    return g.length ? [{header: name, p, n: g.length}, ...withKids(g)] : [];
+  });
 }
+const PRIORITIES = [[5, "High"], [3, "Medium"], [1, "Low"], [0, "None"]];
+const listColor = t => /^#[0-9a-f]{3,8}$/i.test(t.listColor || "") ? ` style="--lc:${t.listColor}"` : "";
 const kidsOf = id => all.filter(x => x.parentId === id).sort(byPriority);
 function withKids(list, depth = 0) {  // each task, then its subtasks if he unfolded it
   return list.flatMap(t => [depth ? {...t, sub: depth} : t, ...(unfolded.has(t.id) && depth < 3 ? withKids(kidsOf(t.id), depth + 1) : [])]);
@@ -214,20 +223,21 @@ function put(task) {  // the server's copy of a task replaces ours
 
 function render() {
   for (const b of document.querySelectorAll("[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === view && !$("#q").value.trim()));
-  const shown = visible(), q = $("#q").value.trim();
-  const head = q ? `${shown.length}${shown.length === 100 ? "+" : ""} found` : `${shown.length} task${shown.length === 1 ? "" : "s"}`;
+  const shown = visible(), q = $("#q").value.trim(), n = shown.filter(t => !t.header).length;
+  const head = q ? `${n}${n === 100 ? "+" : ""} found` : `${n} task${n === 1 ? "" : "s"}`;
   if (!shown.length) {
     const why = linkedId(q) ? (linked === "loading" ? "Looking it up…" : "That task isn't open (or the link is wrong).")
       : q ? "Nothing matches." : view === "chats" ? "No task has a chat yet." : "Nothing here.";
     $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${why}</p>`; return;
   }
   $("#out").innerHTML = (flash ? `<p class="flash">${flash}</p>` : "") + `<p class="msg">${head}</p>` + shown.map(t => {
+    if (t.header) return `<h2 class="grp">${t.header}<span class="n">${t.n}</span></h2>`;
     const c = chats[t.id], kids = kidsOf(t.id).length, folded = !unfolded.has(t.id);
     const meta = [dueText(t), esc(t.list), t.closed ? "done or deleted" : ""].filter(Boolean).join(" · ");
     const tt = t.projectId ? `<a class="link" href="https://ticktick.com/webapp/#p/${esc(t.projectId)}/tasks/${esc(t.id)}" target="_blank" rel="noopener">TickTick ›</a>` : "";
     const fold = kids ? `<button class="fold" data-fold="${esc(t.id)}" aria-expanded="${!folded}"
         aria-label="${folded ? "Show" : "Hide"} ${kids} subtask${kids === 1 ? "" : "s"}">${kids} ${folded ? "▸" : "▾"}</button>` : "";
-    return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" + (t.sub > 1 ? " sub" + t.sub : "") : ""}">
+    return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" + (t.sub > 1 ? " sub" + t.sub : "") : ""}"${listColor(t)}>
       <div class="head"><button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
         <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>${fold}</div>
       <div class="body">${openId === t.id ? notes(t) : ""}
