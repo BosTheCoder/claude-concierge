@@ -128,7 +128,9 @@ function dueText(t) {
     : new Date(d + "T12:00").toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"});
   return late ? `<span class="late">${label}</span>` : label;
 }
-const byPriority = (a, b) => (b.priority || 0) - (a.priority || 0) || (dueDay(a) || "9").localeCompare(dueDay(b) || "9");
+// priority, then earliest day (no date last), then same list together, then time of day
+const byPriority = (a, b) => (b.priority || 0) - (a.priority || 0) || (dueDay(a) || "9").localeCompare(dueDay(b) || "9")
+  || (a.list || "").localeCompare(b.list || "") || stamp(a.dueDate) - stamp(b.dueDate);
 const stamp = s => s ? Date.parse(s.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) || 0 : 0;
 // Search and the Today / Next views are Tickfind's search (search.js, checked against tickfind/tests/search-cases.json);
 // the views' queries are his rules in ticktick-core (rules.toml), sent with the tasks.
