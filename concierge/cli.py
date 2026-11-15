@@ -661,16 +661,22 @@ def ask_cmd(
     question: str,
     option: list[str] = typer.Option(..., "--option", help="Repeat for each choice"),
     recommend: str = typer.Option(None, help="The option you'd pick"),
+    context: str = typer.Option(..., help="What this relates to and what led here, for someone who hasn't read the thread"),
+    why: str = typer.Option(None, help="Why you'd pick --recommend over the others (required with it)"),
     thread: str = typer.Option(None),
     urgency: str = typer.Option("needs"),
     replaces: list[int] = typer.Option(None, "--replaces", help="Decision id(s) this one overtakes: withdrawn"),
 ):
-    """A decision for him: buttons in the app. His tap comes back to you as a message."""
+    """A decision for him: buttons in the app. His tap comes back to you as a message.
+    Check `concierge decisions` first: if one already open covers this, `concierge revise` it instead."""
     from concierge import threads
 
+    if recommend and not (why or "").strip():
+        raise typer.BadParameter("say why you'd pick it: --why")
     with threads.connect() as db:
         th = _open_thread(db, thread)
-        mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend)
+        mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend,
+                           context=context, why=why)
         for old in replaces or []:
             threads.withdraw(db, old, f"replaced by decision {mid}")
     typer.echo(f"asked in thread {th['id']} (decision {mid}); his answer arrives as a message")
@@ -678,7 +684,8 @@ def ask_cmd(
         others = [r for r in threads.open_decisions(db, th["id"]) if r["id"] != mid]
     if others:
         typer.echo(f"Also open in this thread: {', '.join(str(r['id']) for r in others)}. He goes through every one: "
-                   "`concierge withdraw <id> \"<why>\"` any this one or events have overtaken (`concierge decisions` lists them).")
+                   "`concierge withdraw <id> \"<why>\"` any this one or events have overtaken, `concierge revise <id>` any "
+                   "that changed (`concierge decisions` lists them).")
     _nudge_summary(th)
 
 
@@ -691,9 +698,32 @@ def decisions_cmd(thread: str = typer.Option(None)):
         th = _open_thread(db, thread)
         rows = threads.open_decisions(db, th["id"])
     for r in rows:
-        typer.echo(f"{r['id']}  {r['created'][:16]}  {r['text']}\n      options: {', '.join(json.loads(r['options']))}")
+        typer.echo(f"{r['id']}  {r['created'][:16]}  {r['text']}\n      options: {', '.join(json.loads(r['options']))}"
+                   + (f" (you recommended {r['recommend']})" if r["recommend"] else "")
+                   + ("" if r["context"] else "\n      no context yet: add it with `concierge revise --context`"))
     if not rows:
         typer.echo("no open decisions")
+
+
+@app.command("revise")
+def revise_cmd(
+    decision: int,
+    question: str = typer.Option(None),
+    option: list[str] = typer.Option(None, "--option", help="Repeat for each choice: replaces the whole set"),
+    recommend: str = typer.Option(None),
+    context: str = typer.Option(None),
+    why: str = typer.Option(None),
+):
+    """Update an open decision in place when something changes, rather than asking a second one."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        try:
+            threads.revise(db, decision, text=question, options=option or None, recommend=recommend,
+                           context=context, why=why)
+        except (KeyError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"revised decision {decision}")
 
 
 @app.command("withdraw")

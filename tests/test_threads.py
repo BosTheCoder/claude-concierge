@@ -160,3 +160,15 @@ def test_an_overtaken_decision_leaves_his_list_and_a_question_names_the_decision
     typed = []
     threads.say(db, th["id"], "Explain", about=second, submitter=lambda pane, text: typed.append(text))
     assert f"decision {second}" in typed[0] and "Monday" in typed[0]
+
+
+def test_a_decision_is_revised_in_place_and_a_tap_on_a_dropped_option_is_refused(db, clock):
+    th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
+    mid = threads.post(db, th, "Ask Benson for Sunday?", options=["Sunday", "Wait"], recommend="Sunday",
+                       context="RN can look Sun 1-2pm", why="soonest free visit", sender=lambda *_: None)
+    threads.revise(db, mid, text="Ask Benson for Monday?", options=["Monday", "Wait"], recommend="Monday")
+    d = threads.open_decisions(db, th["id"])[0]
+    assert (d["text"], d["recommend"], d["context"], d["why"]) == (
+        "Ask Benson for Monday?", "Monday", "RN can look Sun 1-2pm", "soonest free visit")
+    with pytest.raises(ValueError):
+        threads.answer(db, mid, "Sunday", submitter=lambda *_: None)

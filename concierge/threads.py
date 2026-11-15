@@ -79,8 +79,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
-    if "summary" not in {c["name"] for c in db.execute("PRAGMA table_info(threads)")}:
-        db.execute("ALTER TABLE threads ADD COLUMN summary TEXT")
+    for table, col in (("threads", "summary"), ("messages", "context"), ("messages", "why"), ("messages", "revised")):
+        if col not in {c["name"] for c in db.execute(f"PRAGMA table_info({table})")}:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
     if not db.execute("SELECT 1 FROM modes LIMIT 1").fetchone() and not _kv(db, "modes_seeded"):
         for name, allow, sd, st, ed, et in DEFAULT_MODES:
             db.execute("INSERT INTO modes(name, allow, start_day, start_time, end_day, end_time) VALUES (?,?,?,?,?,?)",
@@ -226,15 +227,17 @@ def find_or_create(db, *, job: str | None, title: str | None, pane: str | None =
 
 def post(db, thread: sqlite3.Row, text: str, *, author: str = "job", urgency: str = "fyi",
          options: list[str] | None = None, recommend: str | None = None, kind: str = "msg",
-         sender=None) -> int:
+         context: str | None = None, why: str | None = None, sender=None) -> int:
     if urgency not in LEVELS:
         raise ValueError(f"urgency must be one of {', '.join(LEVELS)}")
     if options and recommend and recommend not in options:
         raise ValueError("--recommend must be one of the options")
     t = _iso(now())
     cur = db.execute(
-        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, created) VALUES (?,?,?,?,?,?,?,?)",
-        (thread["id"], author, text, urgency, kind, json.dumps(options) if options else None, recommend, t))
+        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, context, why, created) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (thread["id"], author, text, urgency, kind, json.dumps(options) if options else None, recommend,
+         context, why, t))
     db.execute("UPDATE threads SET updated=?, status=CASE WHEN status='closed' AND ?='job' THEN 'open' ELSE status END "
                "WHERE id=?", (t, author, thread["id"]))
     if author != "me":
@@ -343,6 +346,21 @@ def withdraw(db, msg_id: int, why: str) -> None:
     _decision(db, msg_id)
     db.execute("UPDATE messages SET answer=?, answered_by='withdrawn', answered_at=? WHERE id=?",
                (why.strip() or "no longer needed", _iso(now()), msg_id))
+
+
+def revise(db, msg_id: int, *, text: str | None = None, options: list[str] | None = None,
+           recommend: str | None = None, context: str | None = None, why: str | None = None) -> None:
+    """The job updates an open decision in place (new facts, a changed option) instead of
+    asking a second one. A tap on an option that has since gone is refused by answer()."""
+    msg, _ = _decision(db, msg_id)
+    opts = options or json.loads(msg["options"])
+    rec = recommend if recommend is not None else msg["recommend"]
+    if rec and rec not in opts:
+        raise ValueError("--recommend must be one of the options")
+    db.execute("UPDATE messages SET text=?, options=?, recommend=?, context=?, why=?, revised=? WHERE id=?",
+               (text or msg["text"], json.dumps(opts), rec or None, context if context is not None else msg["context"],
+                why if why is not None else msg["why"], _iso(now()), msg_id))
+    db.execute("UPDATE threads SET updated=? WHERE id=?", (_iso(now()), msg["thread"]))
 
 
 def open_decisions(db, thread_id: int) -> list[sqlite3.Row]:

@@ -54,6 +54,9 @@
   .about span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .composer { flex-wrap:wrap; } .composer .about { flex-basis:100%; }
   .answered.withdrawn { color:var(--dim); }
+  details.why { margin-top:6px; border-top:1px solid var(--line); padding-top:4px; }
+  details.why summary { color:var(--blue); font-size:14px; cursor:pointer; padding:4px 0; }
+  details.why div { font-size:15px; color:var(--ink); padding:2px 0 4px; }
   details.hist { margin:14px 0; } details.hist summary { color:var(--dim); cursor:pointer; padding:8px 0; }
   .msg { max-width:88%; margin:8px 0; padding:8px 11px; border-radius:12px; background:var(--card); border:1px solid var(--line);
     white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -183,7 +186,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}</div>${linkify(m.text)}${opts(m)}<div class="askrow"><button class="btn ghost" data-explain="${m.id}">Explain</button><button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
+    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
     ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}
@@ -196,6 +199,7 @@ async function thread(id, quiet) {
     </div>
     <div id="sheet"></div>`;
   if ($("#hist")) $("#hist").ontoggle = e => histOpen = e.target.open;
+  $("#main").querySelectorAll("details.why").forEach(d => d.ontoggle = () => d.open ? folds.add(d.dataset.k) : folds.delete(d.dataset.k));
   if (!$(".composer")) document.body.insertAdjacentHTML("beforeend",
     `<div class="composer"><textarea id="say" rows="1" placeholder="Message"></textarea><button class="btn" id="send">Send</button></div>`);
   $("#say").value = draft;
@@ -212,6 +216,13 @@ async function thread(id, quiet) {
   aboutBar();
   if (!quiet) scrollTo(0, 0);
   poll(() => thread(id, true), 3000);
+}
+// A decision's own context and reasoning, folded under the question; open ones stay open through refreshes.
+const folds = new Set();
+function fold(m, key, label) {
+  if (!m[key]) return "";
+  const k = `${m.id}:${key}`;
+  return `<details class="why" data-k="${k}" ${folds.has(k) ? "open" : ""}><summary>${label}</summary><div>${linkify(m[key])}</div></details>`;
 }
 function opts(m) {
   if (!m.options) return "";

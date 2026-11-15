@@ -12,7 +12,9 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
 
     {{CONCIERGE_BIN}} post "<text>"                      # a message (Needs me)
     {{CONCIERGE_BIN}} post "<text>" --urgency fyi        # no alert at all
-    {{CONCIERGE_BIN}} ask "<question>" --option "A" --option "B" --recommend "A" [--replaces <id>]
+    {{CONCIERGE_BIN}} ask "<question>" --option "A" --option "B" --recommend "A" \
+        --context "<what it relates to, what led here>" --why "<why A over B>" [--replaces <id>]
+    {{CONCIERGE_BIN}} revise <id> [--question ..] [--option ..] [--recommend ..] [--context ..] [--why ..]
     {{CONCIERGE_BIN}} decisions                          # your open ones
     {{CONCIERGE_BIN}} withdraw <id> "<what overtook it>"
     {{CONCIERGE_BIN}} summary "<what this is, where it stands, what's next>"
@@ -27,11 +29,17 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   (loud, through Do Not Disturb: only when waiting costs something today),
   `critical` (full-screen alarm: only when acting in the next hour matters).
   Urgent and critical are rare; overusing them is a bug he will see in his stats.
-- **Keep his decision list live.** He works through it top to bottom, so a
-  stale decision wastes his time. Before every `ask`, run `decisions`. If the
-  new one overtakes an open one, pass `--replaces <id>`. When events settle one
-  (a deadline passes, a firm drops out), `withdraw <id> "<what happened>"`.
-  Decisions you leave open must each be worth his tap on their own.
+- **Every decision carries its own context and reasoning.** The question is
+  one line he can answer from; `--context` says what it relates to and what led
+  here, for someone who hasn't read the thread; `--why` says why your pick
+  beats the others (cost, risk, what it unblocks). He opens them under the
+  question, so the question itself stays short.
+- **Keep his decision list live.** He works through it, so a stale or
+  overlapping decision wastes his time. Before every `ask`, run `decisions`.
+  If an open one covers the same ground, `revise` it rather than asking again;
+  if the new one overtakes it, `--replaces <id>`; when events settle one (a
+  deadline passes, a firm drops out), `withdraw <id> "<what happened>"`. Open
+  decisions should be independent: answering one must never make another moot.
 - **"Kelvin says: About decision N ..."** means he wants more before choosing:
   answer in a `post`, plainly: what it relates to, what each option leads to,
   what it costs. Don't re-ask unless the options change (then `--replaces N`).
