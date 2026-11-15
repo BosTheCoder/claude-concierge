@@ -155,33 +155,59 @@
   document.addEventListener("focusout", () => setTimeout(update, 50));
   update();
   // Offline: sw.js keeps the last copy of every pane and holds edits made with no signal. This pill says
-  // what's waiting, and anything refused when it was finally sent (✕ clears those).
+  // what's waiting, what was refused when it finally went, and what was sent in the last day; tap it for
+  // the list. ✕ clears the sent and refused ones. Notifications (if he turns them on) say when they go.
   if (!("serviceWorker" in navigator) || !window.caches) return;
   navigator.serviceWorker.register("/claude/sw.js", {scope: "/"}).catch(() => {});
   const pill = document.createElement("div");
-  pill.style.cssText = "position:fixed; left:8px; right:8px; bottom:calc(var(--appbar, 0px) + 8px); z-index:2147482999;" +
-    "padding:8px 12px; border-radius:12px; background:#2a2416; color:#f3d9a4; border:1px solid #5a4a22;" +
-    "font:13px/1.35 system-ui, -apple-system, sans-serif; display:flex; gap:8px; align-items:start";
+  pill.id = "appbar-outbox";
   pill.hidden = true;
+  const pillCss = document.createElement("style");
+  pillCss.textContent = `
+    #appbar-outbox { position:fixed; left:8px; right:8px; bottom:calc(var(--appbar, 0px) + 8px); z-index:2147482999;
+      max-height:60vh; overflow:auto; border-radius:14px; background:#2a2416; color:#f3d9a4; border:1px solid #5a4a22;
+      font:14px/1.35 system-ui, -apple-system, sans-serif; box-shadow:0 6px 24px rgba(0,0,0,.35) }
+    #appbar-outbox[hidden] { display:none }
+    #appbar-outbox .top { display:flex; align-items:center; gap:8px; padding:10px 12px }
+    #appbar-outbox .top > button:first-child { all:unset; flex:1; cursor:pointer; min-height:28px }
+    #appbar-outbox .x { all:unset; cursor:pointer; padding:4px 8px; font-size:16px }
+    #appbar-outbox ul { list-style:none; margin:0; padding:0 12px 10px }
+    #appbar-outbox li { padding:8px 0; border-top:1px solid #4a3d1f }
+    #appbar-outbox small { display:block; color:#c9b58a }
+    #appbar-outbox .bell { all:unset; cursor:pointer; margin:0 12px 12px; padding:8px 12px; border-radius:10px; background:#4a3d1f }`;
+  document.head.append(pillCss);
   document.body.append(pill);
-  const what = url => /tt\/update/.test(url) ? "Tasks edit" : "Concierge reply";
+  let open = false;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+  const when = iso => new Date(iso).toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit"});
   const outbox = async () => {
     const box = await caches.open("outbox"), keys = await box.keys();
-    const failed = await Promise.all(keys.filter(k => k.url.includes("/outbox/failed-")).map(k => box.match(k).then(r => r.json())));
-    const waiting = keys.length - failed.length;
-    const lines = (waiting ? [`${waiting} edit${waiting === 1 ? "" : "s"} waiting for signal, sent when you're back online.`] : [])
-      .concat(failed.map(f => `${what(f.url)} not sent: ${f.error}`));
-    pill.hidden = !lines.length;
-    pill.innerHTML = `<div style="flex:1">${lines.map(l => `<div>${l.replace(/[&<>]/g, c => `&#${c.charCodeAt(0)};`)}</div>`).join("")}</div>` +
-      (failed.length ? `<button type="button" aria-label="Clear" style="all:unset; cursor:pointer; padding:0 4px; font-size:16px">✕</button>` : "");
-    pill.querySelector("button")?.addEventListener("click", async () => {
-      await Promise.all(keys.filter(k => k.url.includes("/outbox/failed-")).map(k => box.delete(k))); outbox();
+    const items = await Promise.all(keys.map(k => box.match(k).then(r => r.json()).then(i => ({...i, key: k,
+      kind: k.url.includes("/outbox/failed-") ? "failed" : k.url.includes("/outbox/sent-") ? "sent" : "waiting"}))));
+    const of = kind => items.filter(i => i.kind === kind);
+    const [waiting, failed, sent] = [of("waiting"), of("failed"), of("sent")];
+    const summary = [waiting.length && `⏳ ${waiting.length} waiting for signal`, failed.length && `⚠ ${failed.length} not sent`,
+      sent.length && `✓ ${sent.length} sent`].filter(Boolean).join(" · ");
+    pill.hidden = !items.length;
+    if (!items.length) return;
+    const row = i => `<li>${i.kind === "waiting" ? "⏳" : i.kind === "failed" ? "⚠" : "✓"} ${esc(i.label || "An edit")}<small>${
+      i.kind === "waiting" ? `made ${when(i.at)} with no signal, sends when you're back online`
+      : i.kind === "failed" ? `not sent: ${esc(i.error)}` : `made ${when(i.at)} offline, sent ${when(i.done)}`}</small></li>`;
+    const bell = waiting.length && window.Notification?.permission === "default";
+    pill.innerHTML = `<div class="top"><button type="button" aria-expanded="${open}">${summary} <span aria-hidden="true">${open ? "▾" : "▸"}</span></button>` +
+      (failed.length || sent.length ? `<button type="button" class="x" aria-label="Clear sent and not-sent">✕</button>` : "") + `</div>` +
+      (open ? `<ul>${[...waiting, ...failed, ...sent].map(row).join("")}</ul>` +
+        (bell ? `<button type="button" class="bell">🔔 Tell me when they're sent</button>` : "") : "");
+    pill.querySelector(".top > button").addEventListener("click", () => { open = !open; outbox(); });
+    pill.querySelector(".x")?.addEventListener("click", async () => {
+      await Promise.all(items.filter(i => i.kind !== "waiting").map(i => box.delete(i.key))); outbox();
     });
+    pill.querySelector(".bell")?.addEventListener("click", () => Notification.requestPermission().then(outbox));
   };
-  const flush = () => { navigator.serviceWorker.controller?.postMessage("flush"); setTimeout(outbox, 3000); };
+  const flush = () => { navigator.serviceWorker.controller?.postMessage("flush"); outbox(); };
+  navigator.serviceWorker.addEventListener("message", e => { if (e.data === "outbox") outbox(); });
   addEventListener("online", flush);
   addEventListener("offline", outbox);
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && flush());
-  outbox(); flush();
-  setInterval(() => document.visibilityState === "visible" && outbox(), 5000);
+  flush();
 })();

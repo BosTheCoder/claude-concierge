@@ -101,8 +101,9 @@ let views = {}, all = [], byId = {}, chats = {}, view = store.get("tc-view") || 
 let unfolded = new Set();  // tasks whose subtasks are showing; folded by default
 let editing = null, busy = false, flash = "";  // editing = {id, text}: survives re-renders while he types
 
-async function api(path, body) {
-  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+async function api(path, body, label) {  // label: what sw.js's outbox calls it if it has to wait for signal
+  const headers = {"Content-Type": "application/json", ...(label && {"X-Outbox-Label": encodeURIComponent(label)})};
+  const r = await fetch(path, body ? {method: "POST", headers, body: JSON.stringify(body)} : {});
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.ok === false) throw new Error(j.error || `error ${r.status}`);
   return j;
@@ -186,7 +187,8 @@ async function change(id, fields, msg) {
   busy = true; render();
   const st = $(`#ed-${id}`); if (st) { st.className = "status"; st.textContent = "Saving…"; }
   try {
-    const r = await api("api/tt/update", {id, etag: t.etag, ...fields});
+    const what = "day" in fields ? `Moved to ${fields.day || "no date"}` : msg;
+    const r = await api("api/tt/update", {id, etag: t.etag, ...fields}, `Tasks · ${what}: ${t.title}`);
     if (r.queued) {  // no signal: sw.js sends it later; show it done here and in the copy offline opens use
       const day = "day" in fields ? {dueDate: fields.day && `${fields.day}T00:00:00.000+0000`, isAllDay: true, timeZone: "UTC"} : {};
       r.task = {...t, ...fields, ...day};
