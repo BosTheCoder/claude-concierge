@@ -442,7 +442,7 @@ def handler_for(sampler: Sampler):
                 prefix = "" if ":" in host or host.startswith("127.") else CLAUDE_PREFIX
                 self._send(200, app_api.manifest(prefix).encode(), "application/manifest+json")
                 return
-            if route.startswith(("/api/threads", "/api/alarms/", "/api/settings")):
+            if route.startswith(("/api/threads", "/api/alarms/", "/api/settings", "/api/inbox/")):
                 self._json(*app_api.get(route, urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
                 return
             if self._route() == "/claude.js":
@@ -496,7 +496,7 @@ def handler_for(sampler: Sampler):
             if self.path.startswith("/brief"):
                 self._proxy_brief()
                 return
-            if self._route().startswith(("/api/threads", "/api/settings", "/api/delegations")):
+            if self._route().startswith(("/api/threads", "/api/settings", "/api/delegations", "/api/inbox/")):
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:

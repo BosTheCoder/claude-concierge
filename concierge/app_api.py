@@ -12,7 +12,7 @@ import re
 import threading
 from pathlib import Path
 
-from concierge import config, registry, spawn, threads
+from concierge import config, inbox_waiting, registry, spawn, threads
 
 APP_HTML = Path(__file__).with_name("app.html")
 ROUTE = re.compile(r"^/api/threads/(\d+)(?:/(\w+))?$")
@@ -81,6 +81,11 @@ def get(path: str, query: dict) -> tuple[int, dict]:
         if path.startswith("/api/alarms/"):
             row = db.execute("SELECT * FROM alarms WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
             return (200, {k: row[k] for k in ("id", "level", "title", "body", "open")}) if row else (404, {"error": "no"})
+        if path == "/api/inbox/waiting":
+            try:
+                return 200, {"waiting": inbox_waiting.waiting()}
+            except Exception as exc:  # noqa: BLE001 - the Review page shows it, rather than an empty list
+                return 200, {"waiting": [], "error": f"{type(exc).__name__}: {exc}"}
         if path == "/api/settings/appbar":
             return 200, json.loads(threads._kv(db, "appbar") or "{}")
         if path == "/api/settings":
@@ -144,6 +149,8 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
                 db.execute("INSERT INTO modes(name, allow, start_day, start_time, end_day, end_time, enabled) "
                            "VALUES (?,?,?,?,?,?,?)", fields)
             return 200, {"ok": True}
+        if path == "/api/inbox/resume":
+            return 200, {"ok": True, "window": inbox_waiting.resume(_text(body, "session_id"))}
         if path == "/api/settings/appbar":
             # The phone bar: pane ids in order (appbar.js owns the catalogue) and how many sit in
             # the bar; the rest open from More.

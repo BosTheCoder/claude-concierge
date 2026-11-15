@@ -7,18 +7,58 @@
 <title>Review</title>
 <!-- The Plannotator Inbox inside the one app. It lives on its own address (:45581, owner-only via
      Tailscale), which an installed app would open in a browser sheet; framed here it stays in the app.
-     The plannotator-relay lets this origin, and only this one, frame it. -->
+     The plannotator-relay lets this origin, and only this one, frame it.
+     Above it: replies of his waiting for a chat that has closed, each with Resume (inbox_waiting.py). -->
 <style>
-  html, body { margin:0; height:100%; background:#fff }
-  @media (prefers-color-scheme: dark) { html, body { background:#14161a } }
-  iframe { display:block; border:0; width:100%; height:calc(100dvh - var(--appbar, 0px)) }
+  :root { --bg:#fff; --fg:#1d2024; --muted:#5d636b; --card:#f3f4f6; --line:#e3e5e8; --accent:#2f6fde }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e7e9ec; --muted:#9aa1aa; --card:#1d2026; --line:#2a2e35; --accent:#6c9cf0 } }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.35 system-ui, sans-serif }
+  body { display:flex; flex-direction:column; height:calc(100dvh - var(--appbar, 0px)) }
+  #waiting:empty { display:none }
+  #waiting { padding:8px 12px; border-bottom:1px solid var(--line); background:var(--card); max-height:40dvh; overflow:auto }
+  #waiting .head { font-size:13px; color:var(--muted); margin:2px 0 6px }
+  .row { display:flex; align-items:center; gap:10px; padding:6px 0 }
+  .row + .row { border-top:1px solid var(--line) }
+  .row .what { flex:1; min-width:0 }
+  .row .subj { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .row .sub { font-size:12px; color:var(--muted) }
+  .row button { border:0; border-radius:8px; padding:8px 14px; background:var(--accent); color:#fff; font:inherit; font-weight:600 }
+  .row button:disabled { opacity:.6 }
+  .err { font-size:13px; color:#c0392b }
+  iframe { display:block; border:0; width:100%; flex:1; min-height:0 }
 </style>
 <script src="/claude/appbar.js" defer></script>
 </head>
 <body>
+<div id="waiting"></div>
 <iframe id="inbox" title="Plannotator Inbox" allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
 <script>
   document.getElementById("inbox").src = `https://${location.hostname}:45581/${location.hash}`;
+  const box = document.getElementById("waiting");
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const ago = iso => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    return !iso ? "" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+
+  async function load() {
+    let d;
+    try { d = await (await fetch("/claude/api/inbox/waiting")).json(); }
+    catch (e) { d = {waiting: [], error: String(e)}; }
+    const rows = d.waiting.map(w => `<div class="row"><div class="what"><div class="subj">${esc(w.subject)}</div>
+      <div class="sub">Your reply ${esc(ago(w.at))} · chat closed · ${esc(w.project)}</div></div>
+      <button data-s="${esc(w.session_id)}">Resume</button></div>`).join("");
+    box.innerHTML = d.error ? `<div class="err">Couldn't check for waiting replies: ${esc(d.error)}</div>`
+      : rows && `<div class="head">Waiting for a closed chat</div>${rows}`;
+  }
+  box.addEventListener("click", async e => {
+    const b = e.target.closest("button[data-s]"); if (!b) return;
+    b.disabled = true; b.textContent = "Starting…";
+    const r = await fetch("/claude/api/inbox/resume", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: b.dataset.s})}).then(r => r.json()).catch(e => ({error: String(e)}));
+    if (r.ok) { b.textContent = "Resumed"; setTimeout(load, 20000); }
+    else { b.disabled = false; b.textContent = "Resume";
+      b.closest(".row").querySelector(".sub").textContent = `Couldn't resume: ${r.error || "unknown error"}`; }
+  });
+  load(); setInterval(load, 60000);
 </script>
 </body>
 </html>
