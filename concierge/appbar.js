@@ -38,7 +38,8 @@
       remember(cfg); render(arrange(cfg));
     },
   };
-  const wanted = () => matchMedia("(display-mode: standalone)").matches || innerWidth < 700;
+  // On every screen: it's how he moves between panes. Only a touch keyboard pushes it aside.
+  const touch = matchMedia("(pointer: coarse)").matches;
   const trim = s => s.replace(/\/$/, ""), path = trim(location.pathname);
   const here = PANES.find(({href: p}) => p === "/" ? path === "" : path === trim(p) || path.startsWith(trim(p) + "/"));
   const css = document.createElement("style");
@@ -56,6 +57,9 @@
     #appbar { transition:transform .2s ease }
     html.appbar-off #appbar { display:none }
     html.appbar-tucked #appbar { transform:translateY(110%) }
+    @media (min-width:700px) { #appbar { left:50%; right:auto; width:min(640px, 100vw); transform:translateX(-50%);
+      border:1px solid #2c3038; border-bottom:0; border-radius:16px 16px 0 0 }
+      html.appbar-tucked #appbar { transform:translate(-50%, 110%) } }
     body { padding-bottom:var(--appbar-room, 0px) !important }
     #appbar button { all:unset; flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:2px; min-height:48px; justify-content:center;
       color:#9aa0a8; border-radius:12px; cursor:pointer; font:inherit }
@@ -122,7 +126,7 @@
   let tucked = false;
   const update = () => {
     root.classList.toggle("appbar-light", light());
-    const on = wanted() && !typing(), h = `${nav.offsetHeight || 60}px`;
+    const on = !(touch && typing()), h = `${nav.offsetHeight || 60}px`;
     root.classList.toggle("appbar-off", !on);
     if (!on || tucked) openMore(false);
     root.classList.toggle("appbar-tucked", on && tucked);
