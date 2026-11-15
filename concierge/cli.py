@@ -663,6 +663,7 @@ def ask_cmd(
     recommend: str = typer.Option(None, help="The option you'd pick"),
     thread: str = typer.Option(None),
     urgency: str = typer.Option("needs"),
+    replaces: list[int] = typer.Option(None, "--replaces", help="Decision id(s) this one overtakes: withdrawn"),
 ):
     """A decision for him: buttons in the app. His tap comes back to you as a message."""
     from concierge import threads
@@ -670,8 +671,42 @@ def ask_cmd(
     with threads.connect() as db:
         th = _open_thread(db, thread)
         mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend)
+        for old in replaces or []:
+            threads.withdraw(db, old, f"replaced by decision {mid}")
     typer.echo(f"asked in thread {th['id']} (decision {mid}); his answer arrives as a message")
+    with threads.connect() as db:
+        others = [r for r in threads.open_decisions(db, th["id"]) if r["id"] != mid]
+    if others:
+        typer.echo(f"Also open in this thread: {', '.join(str(r['id']) for r in others)}. He goes through every one: "
+                   "`concierge withdraw <id> \"<why>\"` any this one or events have overtaken (`concierge decisions` lists them).")
     _nudge_summary(th)
+
+
+@app.command("decisions")
+def decisions_cmd(thread: str = typer.Option(None)):
+    """Your open decisions, oldest first: check none is stale before you ask another."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        rows = threads.open_decisions(db, th["id"])
+    for r in rows:
+        typer.echo(f"{r['id']}  {r['created'][:16]}  {r['text']}\n      options: {', '.join(json.loads(r['options']))}")
+    if not rows:
+        typer.echo("no open decisions")
+
+
+@app.command("withdraw")
+def withdraw_cmd(decision: int, why: str = typer.Argument(..., help="One line: what overtook it")):
+    """Take back a decision he no longer needs to make. It leaves his list."""
+    from concierge import threads
+
+    with threads.connect() as db:
+        try:
+            threads.withdraw(db, decision, why)
+        except (KeyError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"withdrew decision {decision}")
 
 
 @app.command("facts")

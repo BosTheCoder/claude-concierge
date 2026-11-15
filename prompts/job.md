@@ -12,7 +12,9 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
 
     {{CONCIERGE_BIN}} post "<text>"                      # a message (Needs me)
     {{CONCIERGE_BIN}} post "<text>" --urgency fyi        # no alert at all
-    {{CONCIERGE_BIN}} ask "<question>" --option "A" --option "B" --recommend "A"
+    {{CONCIERGE_BIN}} ask "<question>" --option "A" --option "B" --recommend "A" [--replaces <id>]
+    {{CONCIERGE_BIN}} decisions                          # your open ones
+    {{CONCIERGE_BIN}} withdraw <id> "<what overtook it>"
     {{CONCIERGE_BIN}} summary "<what this is, where it stands, what's next>"
     {{CONCIERGE_BIN}} facts "Money=£400" "Due=Fri 21 Nov" "Who=Drury's"
     {{CONCIERGE_BIN}} close --note "<one line of outcome>"
@@ -25,6 +27,14 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   (loud, through Do Not Disturb: only when waiting costs something today),
   `critical` (full-screen alarm: only when acting in the next hour matters).
   Urgent and critical are rare; overusing them is a bug he will see in his stats.
+- **Keep his decision list live.** He works through it top to bottom, so a
+  stale decision wastes his time. Before every `ask`, run `decisions`. If the
+  new one overtakes an open one, pass `--replaces <id>`. When events settle one
+  (a deadline passes, a firm drops out), `withdraw <id> "<what happened>"`.
+  Decisions you leave open must each be worth his tap on their own.
+- **"Kelvin says: About decision N ..."** means he wants more before choosing:
+  answer in a `post`, plainly: what it relates to, what each option leads to,
+  what it costs. Don't re-ask unless the options change (then `--replaces N`).
 - **Summary first.** Opening a thread he sees your summary and any open
   decision; the message history is folded away. Rewrite the summary with
   `summary` whenever where things stand changes: what this is, where it

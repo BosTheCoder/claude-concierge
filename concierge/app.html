@@ -49,6 +49,11 @@
     white-space:pre-wrap; overflow-wrap:anywhere; }
   .summary .who, .ask .who { font-size:12px; color:var(--dim); margin-bottom:4px; }
   .ask { border:1px solid var(--amber); border-radius:10px; padding:10px 12px; margin-bottom:10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .askrow { display:flex; gap:6px; margin-top:8px; } .askrow button { flex:1; }
+  .about { font-size:13px; color:var(--dim); padding:0 4px 6px; display:flex; gap:8px; align-items:center; }
+  .about span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .composer { flex-wrap:wrap; } .composer .about { flex-basis:100%; }
+  .answered.withdrawn { color:var(--dim); }
   details.hist { margin:14px 0; } details.hist summary { color:var(--dim); cursor:pointer; padding:8px 0; }
   .msg { max-width:88%; margin:8px 0; padding:8px 11px; border-radius:12px; background:var(--card); border:1px solid var(--line);
     white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -148,13 +153,13 @@ async function home(quiet) {
 }
 
 // --- a thread ---------------------------------------------------------------------------
-let current = null, lastSig = "", histOpen = false;
+let current = null, lastSig = "", histOpen = false, aboutId = null;
 async function thread(id, quiet) {
   let t;
   try { t = await api(`threads/${id}`); } catch (e) { $("#main").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
   const sig = JSON.stringify([t.messages, t.facts, t.summary, t.status, t.floor, t.delegation]);
   if (quiet && sig === lastSig) return;
-  if (!current || current.id !== t.id) histOpen = false;
+  if (!current || current.id !== t.id) { histOpen = false; aboutId = null; }
   lastSig = sig; current = t;
   head(t.title, true);
   const rows = facts => Object.entries(facts || {}).map(([k, v]) => `<div><b>${esc(k)}</b><span>${linkify(v)}</span></div>`).join("");
@@ -162,10 +167,14 @@ async function thread(id, quiet) {
   // What he reads first: the summary (or, until a job writes one, its latest word) and what's waiting on him.
   // The rest is history, folded away.
   const ms = t.messages;
-  const open = ms.filter(m => m.options && (m.answer === null || m.answer === undefined));
+  // Newest first: a later decision can overtake an earlier one the job forgot to withdraw.
+  const open = ms.filter(m => m.options && (m.answer === null || m.answer === undefined)).reverse();
   const lastJob = [...ms].reverse().find(m => m.author !== "me" && m.author !== "app");
-  const lastJobIdx = lastJob ? ms.lastIndexOf(lastJob) : -1;
-  const mine = ms.filter((m, i) => m.author === "me" && i > lastJobIdx);  // his, not answered yet: delivery state matters
+  // His latest message and what came back after it (an Explain, a question): the conversation he's in.
+  // After a day it's history.
+  const lastMe = ms.map(m => m.author).lastIndexOf("me");
+  const mine = lastMe >= 0 && Date.now() - new Date(ms[lastMe].created) < 864e5
+    ? ms.slice(lastMe).filter(m => !open.includes(m)) : [];
   const shown = new Set([...open, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
   const past = ms.filter(m => !shown.has(m));
   const top = t.summary
@@ -174,7 +183,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}</div>${linkify(m.text)}${opts(m)}</div>`).join("")}
+    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}</div>${linkify(m.text)}${opts(m)}<div class="askrow"><button class="btn ghost" data-explain="${m.id}">Explain</button><button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
     ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}
@@ -190,19 +199,25 @@ async function thread(id, quiet) {
   if (!$(".composer")) document.body.insertAdjacentHTML("beforeend",
     `<div class="composer"><textarea id="say" rows="1" placeholder="Message"></textarea><button class="btn" id="send">Send</button></div>`);
   $("#say").value = draft;
-  $("#send").onclick = send; $("#say").oninput = e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; };
+  $("#send").onclick = () => send(); $("#say").oninput = e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; };
   $("#floor").onclick = () => act("floor", {floor: t.floor ? null : "fyi"});
   $("#openclose").onclick = () => act(t.status === "closed" ? "reopen" : "close", {});
   $("#deleg").onclick = () => delegForm(t);
   $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
+  $("#main").querySelectorAll("[data-explain]").forEach(b => b.onclick = () =>
+    send("Explain this one: what it relates to, and what each option leads to and costs.", +b.dataset.explain));
+  $("#main").querySelectorAll("[data-about]").forEach(b => b.onclick = () => {
+    aboutId = +b.dataset.about; aboutBar(); $("#say").focus(); });
+  aboutBar();
   if (!quiet) scrollTo(0, 0);
   poll(() => thread(id, true), 3000);
 }
 function opts(m) {
   if (!m.options) return "";
   if (m.answer !== null && m.answer !== undefined)
-    return m.answered_by === "claude"
+    return m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
+      : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
       : `<div class="answered">You chose “${esc(m.answer)}”</div>`;
   return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
@@ -216,11 +231,21 @@ async function act(action, body) {
   try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }
   catch (e) { toast(e.message); }
 }
-async function send() {
-  const text = $("#say").value.trim(); if (!text) return;
+// "Ask about this": his next message is tied to that decision, shown above the box until sent or dropped.
+function aboutBar() {
+  $(".composer .about")?.remove();
+  const d = current && aboutId && current.messages.find(m => m.id === aboutId);
+  if (!d) return;
+  $(".composer").insertAdjacentHTML("afterbegin", `<div class="about"><span>About: ${esc(d.text)}</span><button class="icon" id="aboutx">✕</button></div>`);
+  $("#aboutx").onclick = () => { aboutId = null; aboutBar(); };
+}
+async function send(canned, about) {
+  const text = canned || $("#say").value.trim(); if (!text) return;
+  const re = canned ? about : aboutId;
   $("#send").disabled = true;
-  try { const r = await api(`threads/${current.id}/say`, {text}, `Message in “${current.title}”: ${text.slice(0, 80)}`); $("#say").value = ""; $("#say").style.height = "auto";
-    if (r.queued) toast("No signal: sends when you're back online");
+  try { const r = await api(`threads/${current.id}/say`, {text, ...(re && {about: re})}, `Message in “${current.title}”: ${text.slice(0, 80)}`);
+    if (!canned) { $("#say").value = ""; $("#say").style.height = "auto"; aboutId = null; aboutBar(); }
+    toast(r.queued ? "No signal: sends when you're back online" : canned ? "Asked Claude to explain" : "Sent");
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
   $("#send").disabled = false;

@@ -293,12 +293,21 @@ def _to_job(thread: sqlite3.Row, body: str) -> str:
             f"(Answer in the app: {config.REPO / 'bin' / 'concierge'} post --thread {thread['id']} \"...\")")
 
 
-def say(db, thread_id: int, text: str, *, author: str = "me", submitter=None) -> int:
-    """His message: stored as sent, then picked up or failed, never silently lost."""
+def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None = None, submitter=None) -> int:
+    """His message: stored as sent, then picked up or failed, never silently lost.
+    `about`: the decision he is asking about, so the job knows which one."""
     thread = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
-    mid = post(db, thread, text, author=author)
+    ref = ""
+    if about is not None:
+        d = db.execute("SELECT text FROM messages WHERE id=? AND thread=? AND options IS NOT NULL",
+                       (about, thread_id)).fetchone()
+        if not d:
+            raise KeyError(f"no decision {about} in this thread")
+        ref = f' About decision {about} ("{d["text"][:200]}"):'
+    shown = f"Re: “{d['text'][:60]}…”\n{text}" if about is not None else text
+    mid = post(db, thread, shown, author=author)
     db.execute("UPDATE messages SET state='sent' WHERE id=?", (mid,))
-    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says: {text}"), submitter=submitter)
+    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}"), submitter=submitter)
     db.execute("UPDATE messages SET state=?, error=? WHERE id=?",
                ("failed" if problem else "picked", problem, mid))
     return mid
@@ -326,6 +335,19 @@ def answer(db, msg_id: int, choice: str, *, note: str = "", submitter=None) -> s
         return None
     body = f'Decision on "{msg["text"]}": Kelvin chose "{choice}".' + (f" {note}" if note else "")
     return _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+
+
+def withdraw(db, msg_id: int, why: str) -> None:
+    """The job takes back a decision it no longer needs: overtaken by a newer one, or by events.
+    It leaves his list; the history keeps it, with why."""
+    _decision(db, msg_id)
+    db.execute("UPDATE messages SET answer=?, answered_by='withdrawn', answered_at=? WHERE id=?",
+               (why.strip() or "no longer needed", _iso(now()), msg_id))
+
+
+def open_decisions(db, thread_id: int) -> list[sqlite3.Row]:
+    return db.execute("SELECT * FROM messages WHERE thread=? AND options IS NOT NULL AND answer IS NULL "
+                      "AND kind!='close?' ORDER BY id", (thread_id,)).fetchall()
 
 
 def delegation_for(db, thread_id: int, kind: str | None = None, at: datetime | None = None) -> sqlite3.Row | None:

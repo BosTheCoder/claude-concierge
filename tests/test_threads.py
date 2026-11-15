@@ -147,3 +147,16 @@ def test_thread_opens_on_summary_with_the_same_fact_rows_everywhere(db, clock):
     assert d["summary"] == "Three prices in; waiting on two more."
     assert list(d["facts"]) == ["Next", "Due", "Money"]  # FACT_KEYS order, whatever order they were set in
     assert d["other_facts"] == {"D05": "fan"}
+
+
+def test_an_overtaken_decision_leaves_his_list_and_a_question_names_the_decision(db, clock):
+    th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
+    first = threads.post(db, th, "Ask Benson for Sunday?", options=["Yes", "Wait"], sender=lambda *_: None)
+    second = threads.post(db, th, "Ask Benson for Monday instead?", options=["Yes", "Wait"], sender=lambda *_: None)
+    threads.withdraw(db, first, "replaced by decision 2")
+    assert [r["id"] for r in threads.open_decisions(db, th["id"])] == [second]
+    with pytest.raises(ValueError):
+        threads.answer(db, first, "Yes")  # withdrawn is final: a late tap can't revive it
+    typed = []
+    threads.say(db, th["id"], "Explain", about=second, submitter=lambda pane, text: typed.append(text))
+    assert f"decision {second}" in typed[0] and "Monday" in typed[0]

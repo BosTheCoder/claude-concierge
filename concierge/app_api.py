@@ -168,7 +168,8 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
         if not db.execute("SELECT 1 FROM threads WHERE id=?", (tid,)).fetchone():
             return 404, {"ok": False, "error": "no such thread"}
         if action == "say":
-            _bg(threads.say, tid, _text(body, "text"))
+            about = int(body["about"]) if body.get("about") is not None else None
+            _bg(threads.say, tid, _text(body, "text"), about=about)
         elif action == "answer":
             msg, choice = int(body["msg"]), _text(body, "choice")
             threads._decision(db, msg)  # refuse now (400) rather than on the worker
