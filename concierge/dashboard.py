@@ -32,6 +32,8 @@ from __future__ import annotations
 import gzip
 import json
 import subprocess
+import contextlib
+import socket
 import threading
 import time
 import re
@@ -157,6 +159,7 @@ class Sampler:
 
 CLAUDE_PREFIX = "/claude"
 BRIEF_UPSTREAM = "http://127.0.0.1:8804"  # inbox-brief's server.py
+VAULT_UPSTREAM = ("127.0.0.1", 16180)  # the vault browser's noVNC viewer (its :6080 republished on loopback)
 CLAUDE_JS = Path(__file__).with_name("claude.js")
 TRUST_PROMPT = "Is this a project you created or one you trust"
 # Browsers send Origin on every POST. Checking it (not just Sec-Fetch-Site) also stops DNS
@@ -383,9 +386,50 @@ def handler_for(sampler: Sampler):
             except OSError as e:
                 self._send(502, f"brief unreachable: {e}".encode(), "text/plain")
 
+        def _proxy_vault(self) -> None:
+            """The vault browser's viewer at /claude/vault, so it opens inside his one phone app (a
+            Tailscale path of its own needs a Windows admin). A raw pipe, so noVNC's websocket
+            (relative: /claude/vault/websockify) goes through as well as its pages."""
+            self.close_connection = True
+            path = self._route()[len("/vault"):]
+            if not path:  # its links are relative: they need the trailing slash
+                self.send_response(301)
+                self.send_header("Location", "vault/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            upgrade = (self.headers.get("Upgrade") or "").lower() == "websocket"
+            head = [f"{self.command} {path} HTTP/1.1", f"Host: {VAULT_UPSTREAM[0]}:{VAULT_UPSTREAM[1]}",
+                    f"Connection: {'Upgrade' if upgrade else 'close'}"]
+            head += [f"{k}: {v}" for k, v in self.headers.items() if k.lower() not in ("host", "connection")]
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                up = socket.create_connection(VAULT_UPSTREAM, timeout=10)
+            except OSError as e:
+                self._send(502, f"vault browser unreachable: {e}".encode(), "text/plain")
+                return
+            up.settimeout(None)
+            up.sendall(("\r\n".join(head) + "\r\n\r\n").encode() + (self.rfile.read(length) if length else b""))
+
+            def pump(src, dst):
+                try:
+                    while chunk := src.recv(65536):
+                        dst.sendall(chunk)
+                except OSError:
+                    pass
+                finally:
+                    with contextlib.suppress(OSError):
+                        dst.shutdown(socket.SHUT_WR)
+            threading.Thread(target=pump, args=(self.connection, up), daemon=True).start()
+            pump(up, self.connection)
+            up.close()
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
             if self.path.startswith("/brief"):
                 self._proxy_brief()
+                return
+            if self._route() == "/vault" or self._route().startswith("/vault/"):
+                self._proxy_vault()
                 return
             route = self._route()
             if route in ("/app", "/app/"):

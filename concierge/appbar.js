@@ -7,9 +7,9 @@
   const PANES = [
     ["/claude/app", "✦", "Concierge"], ["/claude/tasks", "☑", "Tasks"], ["/brief/", "☀", "Brief"],
     ["/money/", "£", "Money"], ["/inbox/", "✉", "Inbox"],
-    // The vault browser lives on its own ports (its pages are built into its container), so in the
-    // installed app it opens over the app with a close bar. Its controls are on the Apps page.
-    [`https://${location.hostname}:16080/`, "◳", "Browser"],
+    // The vault browser's viewer, proxied by the concierge so it opens inside the app.
+    // Its controls (restart, tabs) are on the Apps page and the icon's long-press menu.
+    ["/claude/vault/", "◳", "Browser"],
     ["/", "⋯", "Apps"],  // the tailnet home page: every app he has
   ];
   const wanted = () => matchMedia("(display-mode: standalone)").matches || innerWidth < 700;
@@ -27,8 +27,10 @@
     #appbar a:focus-visible { outline:2px solid #8ab4f8 }
     html.appbar-light #appbar { background:#f6f5f2; border-top-color:#e6e3dd }
     html.appbar-light #appbar a { color:#6b6f76 } html.appbar-light #appbar a[aria-current=page] { color:#1a73e8 }
+    #appbar { transition:transform .2s ease }
     html.appbar-off #appbar { display:none }
-    body { padding-bottom:var(--appbar, 0px) !important }`;
+    html.appbar-tucked #appbar { transform:translateY(110%) }
+    body { padding-bottom:var(--appbar-room, 0px) !important }`;
   const nav = document.createElement("nav");
   nav.id = "appbar";
   nav.setAttribute("aria-label", "Apps");
@@ -42,12 +44,26 @@
     const [r, g, b] = (getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [20, 20, 20]).map(Number);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b > 140;
   };
+  // Scrolling down tucks it away; scrolling up (or reaching the top) brings it back.
+  let tucked = false;
   const update = () => {
     root.classList.toggle("appbar-light", light());
-    const on = wanted() && !typing();
+    const on = wanted() && !typing(), h = `${nav.offsetHeight || 60}px`;
     root.classList.toggle("appbar-off", !on);
-    root.style.setProperty("--appbar", on ? `${nav.offsetHeight || 60}px` : "0px");
+    root.classList.toggle("appbar-tucked", on && tucked);
+    root.style.setProperty("--appbar-room", on ? h : "0px");  // page end stays clear of it
+    root.style.setProperty("--appbar", on && !tucked ? h : "0px");  // what fixed things sit on
   };
+  const lastY = new WeakMap();
+  document.addEventListener("scroll", e => {
+    const el = e.target === document ? document.scrollingElement : e.target;
+    if (!el || el.scrollHeight - el.clientHeight < 200) return;  // a short list isn't worth hiding for
+    const y = el.scrollTop, prev = lastY.has(el) ? lastY.get(el) : 0;
+    lastY.set(el, y);
+    if (Math.abs(y - prev) < 6) return;
+    const want = y > prev && y > 60;
+    if (want !== tucked) { tucked = want; update(); }
+  }, {capture: true, passive: true});
   // Installing from any pane installs the one app, never a separate copy of the pane.
   let link = document.querySelector('link[rel="manifest"]');
   if (!link) { link = document.createElement("link"); link.rel = "manifest"; document.head.append(link); }
