@@ -457,8 +457,14 @@ def handler_for(sampler: Sampler):
             if self._route() == "/appbar.js":
                 self._send(200, TASKS_HTML.with_name("appbar.js").read_bytes(), "text/javascript; charset=utf-8")
                 return
-            if self._route() == "/tasks-sw.js":
-                self._send(200, TASKS_HTML.with_name("tasks-sw.js").read_bytes(), "text/javascript; charset=utf-8")
+            if self._route() == "/sw.js":  # the app's offline worker; the header lets it cover the whole address
+                body = TASKS_HTML.with_name("sw.js").read_bytes()
+                self.send_response(200)
+                for k, v in (("Content-Type", "text/javascript; charset=utf-8"), ("Content-Length", str(len(body))),
+                             ("Cache-Control", "no-store"), ("Service-Worker-Allowed", "/")):
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(body)
                 return
             if self._route() == "/search.js":
                 self._send(200, TASKS_HTML.with_name("search.js").read_bytes(), "text/javascript; charset=utf-8")

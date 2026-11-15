@@ -187,8 +187,16 @@ async function change(id, fields, msg) {
   const st = $(`#ed-${id}`); if (st) { st.className = "status"; st.textContent = "Saving…"; }
   try {
     const r = await api("api/tt/update", {id, etag: t.etag, ...fields});
+    if (r.queued) {  // no signal: sw.js sends it later; show it done here and in the copy offline opens use
+      const day = "day" in fields ? {dueDate: fields.day && `${fields.day}T00:00:00.000+0000`, isAllDay: true, timeZone: "UTC"} : {};
+      r.task = {...t, ...fields, ...day};
+      try { const last = JSON.parse(store.get("tc-last")); last.r.tasks = last.r.tasks.map(x => x.id === id ? {...x, ...fields, ...day} : x);
+        store.set("tc-last", JSON.stringify(last)); } catch {}
+      msg += " (sends when you're back online)";
+    }
     put(r.task);
     if (r.task.status) { flash = `${msg}: ${esc(r.task.title)}`; openId = null; }
+    else if (r.queued) flash = `${msg}: ${esc(r.task.title)}`;
     if ("content" in fields) editing = null;
   } catch (e) {
     flash = `<span class="late">Not saved. ${esc(e.message)}</span>`;
@@ -312,7 +320,8 @@ document.addEventListener("change", e => {
 $("#reload").onclick = () => { $("#out").insertAdjacentHTML("afterbegin", `<p class="msg">Refreshing…</p>`); load(true).then(() => setTimeout(() => load(), 6000)); };
 try { const last = JSON.parse(store.get("tc-last")); if (last) { apply(last.r, last.c); render(); } } catch {}
 load();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("tasks-sw.js", {scope: "tasks"}).catch(() => {});
+// The app-wide sw.js (appbar.js) replaced this page's own worker; a narrower scope would keep winning here.
+navigator.serviceWorker?.getRegistrations().then(rs => rs.filter(r => r.scope.endsWith("/tasks")).forEach(r => r.unregister())).catch(() => {});
 </script>
 </body>
 </html>

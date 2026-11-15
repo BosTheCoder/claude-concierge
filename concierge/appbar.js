@@ -154,4 +154,34 @@
   document.addEventListener("focusin", update);
   document.addEventListener("focusout", () => setTimeout(update, 50));
   update();
+  // Offline: sw.js keeps the last copy of every pane and holds edits made with no signal. This pill says
+  // what's waiting, and anything refused when it was finally sent (✕ clears those).
+  if (!("serviceWorker" in navigator) || !window.caches) return;
+  navigator.serviceWorker.register("/claude/sw.js", {scope: "/"}).catch(() => {});
+  const pill = document.createElement("div");
+  pill.style.cssText = "position:fixed; left:8px; right:8px; bottom:calc(var(--appbar, 0px) + 8px); z-index:2147482999;" +
+    "padding:8px 12px; border-radius:12px; background:#2a2416; color:#f3d9a4; border:1px solid #5a4a22;" +
+    "font:13px/1.35 system-ui, -apple-system, sans-serif; display:flex; gap:8px; align-items:start";
+  pill.hidden = true;
+  document.body.append(pill);
+  const what = url => /tt\/update/.test(url) ? "Tasks edit" : "Concierge reply";
+  const outbox = async () => {
+    const box = await caches.open("outbox"), keys = await box.keys();
+    const failed = await Promise.all(keys.filter(k => k.url.includes("/outbox/failed-")).map(k => box.match(k).then(r => r.json())));
+    const waiting = keys.length - failed.length;
+    const lines = (waiting ? [`${waiting} edit${waiting === 1 ? "" : "s"} waiting for signal, sent when you're back online.`] : [])
+      .concat(failed.map(f => `${what(f.url)} not sent: ${f.error}`));
+    pill.hidden = !lines.length;
+    pill.innerHTML = `<div style="flex:1">${lines.map(l => `<div>${l.replace(/[&<>]/g, c => `&#${c.charCodeAt(0)};`)}</div>`).join("")}</div>` +
+      (failed.length ? `<button type="button" aria-label="Clear" style="all:unset; cursor:pointer; padding:0 4px; font-size:16px">✕</button>` : "");
+    pill.querySelector("button")?.addEventListener("click", async () => {
+      await Promise.all(keys.filter(k => k.url.includes("/outbox/failed-")).map(k => box.delete(k))); outbox();
+    });
+  };
+  const flush = () => { navigator.serviceWorker.controller?.postMessage("flush"); setTimeout(outbox, 3000); };
+  addEventListener("online", flush);
+  addEventListener("offline", outbox);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && flush());
+  outbox(); flush();
+  setInterval(() => document.visibilityState === "visible" && outbox(), 5000);
 })();

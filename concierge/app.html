@@ -198,13 +198,15 @@ async function act(action, body) {
 async function send() {
   const text = $("#say").value.trim(); if (!text) return;
   $("#send").disabled = true;
-  try { await api(`threads/${current.id}/say`, {text}); $("#say").value = ""; $("#say").style.height = "auto";
+  try { const r = await api(`threads/${current.id}/say`, {text}); $("#say").value = ""; $("#say").style.height = "auto";
+    if (r.queued) toast("No signal: sends when you're back online");
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
   $("#send").disabled = false;
 }
 async function choose(id, choice) {
-  try { await api(`threads/${current.id}/answer`, {msg:id, choice}); toast(`Sent: ${choice}`);
+  try { const r = await api(`threads/${current.id}/answer`, {msg:id, choice});
+    toast(r.queued ? `No signal: “${choice}” sends when you're back online` : `Sent: ${choice}`);
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
 }
