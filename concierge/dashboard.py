@@ -44,7 +44,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from concierge import app_api, config, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
+from concierge import app_api, config, recording, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
 
 # Fast enough that a reap shows up on the next poll, slow enough that the
 # dashboard is not itself a load on the machine it exists to relieve. One poll
@@ -234,6 +234,37 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
         return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     threading.Thread(target=finish_start, args=(job["id"], fields["cwd"]), daemon=True).start()
     return 200, {"ok": True, "id": job["id"], "rc_url": job.get("rc_url")}
+
+
+def recording_request(handler) -> tuple[int, dict]:
+    """POST /api/recording: an mp4 from the screen-to-claude phone app, note in ?note=.
+
+    Answers once the file is on disk; frames, transcript and the job follow in the
+    background, so the phone isn't held for a minute of prep."""
+    if handler.headers.get("Origin") or (handler.headers.get("Sec-Fetch-Site") or "") == "cross-site":
+        return 403, {"ok": False, "error": "the phone app posts here, not pages"}
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError:
+        length = -1
+    if not 0 < length <= recording.MAX_BYTES:
+        return 400, {"ok": False, "error": "bad body length"}
+    chat = registry.last_chat()
+    if not chat:
+        return 503, {"ok": False, "error": "the concierge has no Telegram chat yet; message it once"}
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    note = (query.get("note") or [""])[0][:SPAWN_LIMITS["note"]].strip()
+    try:
+        folder = recording.save(handler.rfile, length)
+    except (ValueError, OSError) as exc:
+        return 400, {"ok": False, "error": str(exc)}
+
+    def locked_spawn(**kw):
+        with REGISTRY_LOCK:
+            return spawn.spawn_job(**kw)
+
+    recording.start_in_background(folder, note, spawner=locked_spawn, finish=finish_start, chat=chat)
+    return 200, {"ok": True, "folder": folder.name}
 
 
 def finish_start(job_id: str, cwd: str, *, poller=None) -> None:
@@ -520,6 +551,9 @@ def handler_for(sampler: Sampler):
                     return
                 handle = task_chat_request if self._route() == "/api/task-chat" else ticktick_update
                 self._json(*handle(self.headers, self.rfile.read(length)))
+                return
+            if self._route() == "/api/recording":
+                self._json(*recording_request(self))
                 return
             if self._route() == "/api/spawn":
                 try:
