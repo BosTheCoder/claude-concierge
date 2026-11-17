@@ -414,8 +414,13 @@ def decided(db, thread: sqlite3.Row, question: str, choice: str, *, rule: str, k
 def undo(db, msg_id: int, *, submitter=None) -> str | None:
     """Take back a decision: his own answer (the question opens again) or one Claude took for him."""
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
-    if msg and msg["answered_by"] == "me" and msg["kind"] != "close?":
+    if msg and msg["answered_by"] == "me":
         reopen_q = "UPDATE messages SET answer=NULL, answered_by=NULL, answered_at=NULL, state=NULL, error=NULL WHERE id=?"
+        if msg["kind"] == "close?":  # the app's own question: nothing went to a job
+            db.execute(reopen_q, (msg_id,))
+            if msg["answer"] == "Close":
+                reopen(db, msg["thread"])
+            return None
         if db.execute(reopen_q + " AND state IN ('held', 'failed')", (msg_id,)).rowcount:
             return None  # the job never had it
         db.execute(reopen_q, (msg_id,))

@@ -174,6 +174,7 @@
     #appbar-outbox[hidden] { display:none }
     #appbar-outbox .top { display:flex; align-items:center; gap:8px; padding:10px 12px }
     #appbar-outbox .top > button:first-child { all:unset; flex:1; cursor:pointer; min-height:28px }
+    #appbar-outbox .drop { all:unset; cursor:pointer; float:right; padding:2px 10px; border-radius:8px; background:#4a3d1f }
     #appbar-outbox .x { all:unset; cursor:pointer; padding:4px 8px; font-size:16px }
     #appbar-outbox ul { list-style:none; margin:0; padding:0 12px 10px }
     #appbar-outbox li { padding:8px 0; border-top:1px solid #4a3d1f }
@@ -194,7 +195,10 @@
       sent.length && `✓ ${sent.length} sent`].filter(Boolean).join(" · ");
     pill.hidden = !items.length;
     if (!items.length) return;
-    const row = i => `<li>${i.kind === "waiting" ? "⏳" : i.kind === "failed" ? "⚠" : "✓"} ${esc(i.label || "An edit")}<small>${
+    // A waiting thread answer or message can be taken back before it ever leaves the phone.
+    const drop = i => i.kind === "waiting" && /\/threads\/\d+\/(answer|say)$/.test(i.url)
+      ? ` <button type="button" class="drop" data-k="${esc(i.key.url)}">Take back</button>` : "";
+    const row = i => `<li>${i.kind === "waiting" ? "⏳" : i.kind === "failed" ? "⚠" : "✓"} ${esc(i.label || "An edit")}${drop(i)}<small>${
       i.kind === "waiting" ? `made ${when(i.at)} with no signal, sends when you're back online`
       : i.kind === "failed" ? `not sent: ${esc(i.error)}` : `made ${when(i.at)} offline, sent ${when(i.done)}`}</small></li>`;
     const bell = waiting.length && window.Notification?.permission === "default";
@@ -206,12 +210,16 @@
     pill.querySelector(".x")?.addEventListener("click", async () => {
       await Promise.all(items.filter(i => i.kind !== "waiting").map(i => box.delete(i.key))); outbox();
     });
+    pill.querySelectorAll(".drop").forEach(b => b.addEventListener("click", async () => {
+      await box.delete(b.dataset.k); dispatchEvent(new Event("outbox-changed"));
+    }));
     pill.querySelector(".bell")?.addEventListener("click", () => Notification.requestPermission().then(outbox));
   };
   const flush = () => { navigator.serviceWorker.controller?.postMessage("flush"); outbox(); };
   navigator.serviceWorker.addEventListener("message", e => { if (e.data === "outbox") outbox(); });
   addEventListener("online", flush);
   addEventListener("offline", outbox);
+  addEventListener("outbox-changed", outbox);
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && flush());
   flush();
 })();

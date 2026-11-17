@@ -5,7 +5,7 @@
 // when the network is back (Background Sync, or the next time a pane opens). appbar.js lists them.
 const PAGES = "concierge-pages-v1", OUTBOX = "outbox";
 const PANES = ["/claude/", "/brief/", "/money/", "/inbox/"];  // not /claude/vault: a live screen, nothing to keep
-const QUEUED = /^\/claude\/api\/(tt\/update|threads\/[^/]+\/(answer|say))$/;
+const QUEUED = /^\/claude\/api\/(tt\/update|threads\/[^/]+\/(answer|say|undo))$/;
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));

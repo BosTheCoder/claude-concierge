@@ -200,3 +200,17 @@ def test_an_answer_held_when_the_dashboard_died_still_goes(db, clock, monkeypatc
     monkeypatch.setattr(threads.tmuxctl, "submit", lambda pane, text: typed.append(text))
     threads.tick(db, at=WED_NOON + timedelta(minutes=5), sender=lambda *_: None)
     assert len(typed) == 1 and 'chose "PKUK"' in typed[0]
+
+
+def test_undoing_close_reopens_the_thread_and_the_question(db, clock):
+    th = threads.find_or_create(db, job="A1", title="Plumber", pane="p")
+    clock["now"] = WED_NOON + timedelta(days=4)
+    threads.tick(db, sender=lambda *_: None)
+    ask = threads.open_decisions(db, th["id"]) or db.execute(
+        "SELECT * FROM messages WHERE kind='close?' AND answer IS NULL").fetchall()
+    mid = ask[0]["id"]
+    threads.answer(db, mid, "Close")
+    assert threads.detail(db, th["id"])["status"] == "closed"
+    threads.undo(db, mid, submitter=lambda *_: pytest.fail("nothing goes to the job"))
+    assert threads.detail(db, th["id"])["status"] == "open"
+    assert db.execute("SELECT answer FROM messages WHERE id=?", (mid,)).fetchone()[0] is None

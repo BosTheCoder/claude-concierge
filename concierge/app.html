@@ -180,6 +180,9 @@ let current = null, lastSig = "", histOpen = false, aboutId = null;
 async function thread(id, quiet) {
   let t;
   try { t = await api(`threads/${id}`); } catch (e) { $("#main").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  const offline = await waitingAnswers();
+  for (const m of t.messages) if (offline[m.id] && m.answer == null)
+    Object.assign(m, {answer: offline[m.id].choice, answered_by: "me", answered_at: offline[m.id].at, state: "offline"});
   const sig = JSON.stringify([t.messages, t.facts, t.summary, t.status, t.floor, t.delegation]);
   if (quiet && sig === lastSig) return;
   if (!current || current.id !== t.id) { histOpen = false; aboutId = null; }
@@ -199,8 +202,8 @@ async function thread(id, quiet) {
   const mine = lastMe >= 0 && Date.now() - new Date(ms[lastMe].created) < 864e5
     ? ms.slice(lastMe).filter(m => !open.includes(m)) : [];
   // Answered in the last half hour: kept up here so its Undo is one tap away.
-  const recent = ms.filter(m => m.options && m.answered_at && m.kind !== "close?" && m.answered_by !== "withdrawn"
-    && !m.undone && Date.now() - new Date(m.answered_at) < 18e5 && !mine.includes(m)).reverse();
+  const recent = ms.filter(m => m.options && m.answered_at && m.answered_by !== "withdrawn" && !m.undone
+    && (m.state === "offline" || Date.now() - new Date(m.answered_at) < 18e5) && !mine.includes(m)).reverse();
   const shown = new Set([...open, ...recent, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
   const past = ms.filter(m => !shown.has(m));
   const top = t.summary
@@ -254,7 +257,7 @@ function opts(m) {
     return m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
       : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
-      : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""}${m.kind === "close?" ? "" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`;
+      : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "offline" ? " · waiting for signal" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-undo="${m.id}">Undo</button></div>`;
   return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
 }
 function msg(m) {
@@ -287,13 +290,35 @@ async function send(canned, about) {
 }
 async function choose(id, choice) {
   try { const r = await api(`threads/${current.id}/answer`, {msg:id, choice}, `Answer “${choice}” in “${current.title}”`);
-    toast(r.queued ? `No signal: “${choice}” sends when you're back online` : `“${choice}” goes in 10s. Undo is under the question`);
+    toast(r.queued ? `No signal: “${choice}” sends when you're back online. Undo is under the question` : current.messages.find(m => m.id === id)?.kind === "close?" ? `Done: ${choice}. Undo is under the question`
+      : `“${choice}” goes in 10s. Undo is under the question`);
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
 }
+// Answers tapped with no signal, still in sw.js's outbox: shown as chosen, and Undo just takes them out.
+async function waitingAnswers() {
+  const out = {};
+  if (!window.caches) return out;
+  const box = await caches.open("outbox");
+  for (const k of await box.keys()) {
+    if (/\/outbox\/(sent|failed)-/.test(k.url)) continue;
+    const i = await (await box.match(k)).json().catch(() => ({}));
+    if (!/\/threads\/\d+\/answer$/.test(i.url || "")) continue;
+    const b = JSON.parse(i.body || "{}");
+    out[b.msg] = {choice: b.choice, at: i.at, key: k.url};
+  }
+  return out;
+}
 async function undo(id) {
-  try { await api(`threads/${current.id}/undo`, {msg:id}); toast("Taken back. If Claude already had it, it's been told"); lastSig = ""; thread(current.id); }
-  catch (e) { toast(e.message); }
+  const held = (await waitingAnswers())[id];
+  if (held && await (await caches.open("outbox")).delete(held.key)) {
+    toast("Taken back. It never left your phone"); dispatchEvent(new Event("outbox-changed"));
+  } else {
+    try { const r = await api(`threads/${current.id}/undo`, {msg:id}, `Undo in “${current.title}”`);
+      toast(r.queued ? "No signal: the undo goes when you're back online" : "Taken back. If Claude already had it, it's been told"); }
+    catch (e) { toast(e.message); return; }
+  }
+  lastSig = ""; thread(current.id);
 }
 function delegForm(t) {
   if (t.delegation) {

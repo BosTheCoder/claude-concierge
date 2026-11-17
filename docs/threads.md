@@ -41,6 +41,9 @@ typed to the job: Undo in that window just reopens the question. After it, Undo 
 it and tells the job he took it back, to reverse what it can and wait for a new answer.
 An answer whose worker died in the window is sent by the next threads tick.
 Claude's own delegated decisions keep their Undo as before.
+An answer tapped with no signal sits in sw.js's outbox: Undo (or Take back on the
+outbox pill) deletes it there, so it never leaves the phone. Undo on a "Close it?"
+answer reopens the question, and the thread if it closed it.
 
 ## Alerts
 
