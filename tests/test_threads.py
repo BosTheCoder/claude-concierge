@@ -172,3 +172,31 @@ def test_a_decision_is_revised_in_place_and_a_tap_on_a_dropped_option_is_refused
         "Ask Benson for Monday?", "Monday", "RN can look Sun 1-2pm", "soonest free visit")
     with pytest.raises(ValueError):
         threads.answer(db, mid, "Sunday", submitter=lambda *_: None)
+
+
+def test_he_can_take_back_an_answer_before_and_after_it_reaches_the_job(db, clock, monkeypatch):
+    th = threads.find_or_create(db, job="A1", title="Plumber", pane="p")
+    mid = threads.post(db, th, "Which plumber?", options=["Drury's", "PKUK"], sender=lambda *_: None)
+    typed = []
+    sub = lambda pane, text: typed.append(text)  # noqa: E731
+    # Undo inside the window: the job never hears of it, and the question is open again.
+    monkeypatch.setattr(threads.time, "sleep", lambda s: threads.undo(db, mid, submitter=sub))
+    assert threads.answer(db, mid, "PKUK", submitter=sub, grace=10) is not None
+    assert typed == [] and threads.detail(db, th["id"])["needs"] == "decision"
+    # Undo after it went: reopened, and the job is told to reverse what it did.
+    monkeypatch.setattr(threads.time, "sleep", lambda s: None)
+    assert threads.answer(db, mid, "Drury's", submitter=sub, grace=10) is None
+    threads.undo(db, mid, submitter=sub)
+    assert len(typed) == 2 and "took back" in typed[1] and '"Drury\'s"' in typed[1]
+    assert threads.answer(db, mid, "PKUK", submitter=sub) is None  # he can answer again
+
+
+def test_an_answer_held_when_the_dashboard_died_still_goes(db, clock, monkeypatch):
+    th = threads.find_or_create(db, job="A1", title="Plumber", pane="p")
+    mid = threads.post(db, th, "Which plumber?", options=["Drury's", "PKUK"], sender=lambda *_: None)
+    db.execute("UPDATE messages SET answer='PKUK', answered_by='me', answered_at=?, state='held' WHERE id=?",
+               (threads._iso(WED_NOON), mid))
+    typed = []
+    monkeypatch.setattr(threads.tmuxctl, "submit", lambda pane, text: typed.append(text))
+    threads.tick(db, at=WED_NOON + timedelta(minutes=5), sender=lambda *_: None)
+    assert len(typed) == 1 and 'chose "PKUK"' in typed[0]

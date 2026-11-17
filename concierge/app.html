@@ -198,7 +198,10 @@ async function thread(id, quiet) {
   const lastMe = ms.map(m => m.author).lastIndexOf("me");
   const mine = lastMe >= 0 && Date.now() - new Date(ms[lastMe].created) < 864e5
     ? ms.slice(lastMe).filter(m => !open.includes(m)) : [];
-  const shown = new Set([...open, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
+  // Answered in the last half hour: kept up here so its Undo is one tap away.
+  const recent = ms.filter(m => m.options && m.answered_at && m.kind !== "close?" && m.answered_by !== "withdrawn"
+    && !m.undone && Date.now() - new Date(m.answered_at) < 18e5 && !mine.includes(m)).reverse();
+  const shown = new Set([...open, ...recent, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
   const past = ms.filter(m => !shown.has(m));
   const top = t.summary
     ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>`
@@ -207,6 +210,7 @@ async function thread(id, quiet) {
   $("#main").innerHTML = `
     ${top}
     ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
+    ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
     ${t.status === "closed" ? `<p class="muted">Closed. Reopen to carry on.</p>` : ""}
@@ -250,7 +254,7 @@ function opts(m) {
     return m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
       : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
-      : `<div class="answered">You chose “${esc(m.answer)}”</div>`;
+      : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""}${m.kind === "close?" ? "" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`;
   return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
 }
 function msg(m) {
@@ -283,12 +287,12 @@ async function send(canned, about) {
 }
 async function choose(id, choice) {
   try { const r = await api(`threads/${current.id}/answer`, {msg:id, choice}, `Answer “${choice}” in “${current.title}”`);
-    toast(r.queued ? `No signal: “${choice}” sends when you're back online` : `Sent: ${choice}`);
+    toast(r.queued ? `No signal: “${choice}” sends when you're back online` : `“${choice}” goes in 10s. Undo is under the question`);
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
 }
 async function undo(id) {
-  try { await api(`threads/${current.id}/undo`, {msg:id}); toast("Claude has been told to undo it"); lastSig = ""; thread(current.id); }
+  try { await api(`threads/${current.id}/undo`, {msg:id}); toast("Taken back. If Claude already had it, it's been told"); lastSig = ""; thread(current.id); }
   catch (e) { toast(e.message); }
 }
 function delegForm(t) {

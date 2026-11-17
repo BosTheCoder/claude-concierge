@@ -180,7 +180,8 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
         elif action == "answer":
             msg, choice = int(body["msg"]), _text(body, "choice")
             threads._decision(db, msg)  # refuse now (400) rather than on the worker
-            _bg(threads.answer, msg, choice, note=_text(body, "note", required=False))
+            _bg(threads.answer, msg, choice, note=_text(body, "note", required=False),
+                grace=threads.UNDO_SECONDS)
         elif action == "undo":
             _bg(threads.undo, int(body["msg"]))
         elif action == "close":

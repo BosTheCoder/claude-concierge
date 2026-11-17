@@ -34,6 +34,14 @@ A decision is a row in `state/threads.db`, answered only by his tap (`answer`) o
 `decided` under a live delegation. Jobs run with `--disallowedTools AskUserQuestion`:
 that menu is what a typed Enter answered on 30 Oct (a £450 quote accepted).
 
+## Undo
+
+Every answered decision has an Undo. His tap waits `UNDO_SECONDS` (10s) before it is
+typed to the job: Undo in that window just reopens the question. After it, Undo reopens
+it and tells the job he took it back, to reverse what it can and wait for a new answer.
+An answer whose worker died in the window is sent by the next threads tick.
+Claude's own delegated decisions keep their Undo as before.
+
 ## Alerts
 
 `raise_alarm` stores the alarm and posts its URL (`/api/alarms/<id>`) to ntfy.sh on

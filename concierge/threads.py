@@ -19,6 +19,7 @@ import json
 import math
 import sqlite3
 import threading
+import time
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ DB_FILE = config.REPO / "state" / "threads.db"
 LONDON = ZoneInfo("Europe/London")
 LEVELS = ("fyi", "needs", "urgent", "critical")
 QUIET_DAYS = 3
+UNDO_SECONDS = 10  # his answer waits this long before it goes to the job, so Undo can take it back quietly
 # The facts card has the same rows on every thread, in this order. A job that wants
 # another row is told these; anything else belongs in the summary.
 FACT_KEYS = ("Next", "Waiting on", "Due", "Money", "Who", "Decided", "Link")
@@ -325,19 +327,34 @@ def _decision(db, msg_id: int) -> tuple[sqlite3.Row, sqlite3.Row]:
     return msg, db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
 
 
-def answer(db, msg_id: int, choice: str, *, note: str = "", submitter=None) -> str | None:
-    """His tap on a decision. Returns why it didn't reach the job, or None."""
+def answer(db, msg_id: int, choice: str, *, note: str = "", submitter=None, grace: float = 0) -> str | None:
+    """His tap on a decision. It waits `grace` seconds before going to the job, so Undo in that
+    window takes it back without the job ever seeing it. Returns why it didn't reach the job, or None."""
     msg, thread = _decision(db, msg_id)
     if choice not in json.loads(msg["options"]):
         raise ValueError("not one of the options")
-    db.execute("UPDATE messages SET answer=?, answered_by='me', answered_at=? WHERE id=?",
+    db.execute("UPDATE messages SET answer=?, answered_by='me', answered_at=?, state='held', error=NULL WHERE id=?",
                (choice, _iso(now()), msg_id))
     if msg["kind"] == "close?":
+        db.execute("UPDATE messages SET state=NULL WHERE id=?", (msg_id,))
         if choice == "Close":
             close(db, thread["id"])
         return None
-    body = f'Decision on "{msg["text"]}": Kelvin chose "{choice}".' + (f" {note}" if note else "")
-    return _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+    if grace:
+        time.sleep(grace)
+    return _send_answer(db, msg_id, note=note, submitter=submitter)
+
+
+def _send_answer(db, msg_id: int, *, note: str = "", submitter=None) -> str | None:
+    # Claim it out of the undo window first: once it leaves 'held', Undo has to tell the job instead.
+    if not db.execute("UPDATE messages SET state='sending' WHERE id=? AND state='held'", (msg_id,)).rowcount:
+        return "taken back before it was sent"
+    msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    thread = db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
+    body = f'Decision on "{msg["text"]}": Kelvin chose "{msg["answer"]}".' + (f" {note}" if note else "")
+    problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+    db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else "picked", problem, msg_id))
+    return problem
 
 
 def withdraw(db, msg_id: int, why: str) -> None:
@@ -395,9 +412,20 @@ def decided(db, thread: sqlite3.Row, question: str, choice: str, *, rule: str, k
 
 
 def undo(db, msg_id: int, *, submitter=None) -> str | None:
+    """Take back a decision: his own answer (the question opens again) or one Claude took for him."""
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    if msg and msg["answered_by"] == "me" and msg["kind"] != "close?":
+        reopen_q = "UPDATE messages SET answer=NULL, answered_by=NULL, answered_at=NULL, state=NULL, error=NULL WHERE id=?"
+        if db.execute(reopen_q + " AND state IN ('held', 'failed')", (msg_id,)).rowcount:
+            return None  # the job never had it
+        db.execute(reopen_q, (msg_id,))
+        thread = db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
+        body = (f'Kelvin took back his answer "{msg["answer"]}" on "{msg["text"]}". Undo what you did on it '
+                "if you can and tell him what couldn't be undone. The decision is open again in the app: "
+                "wait for his new answer.")
+        return _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
     if not msg or msg["answered_by"] != "claude" or msg["undone"]:
-        raise ValueError("only an un-undone decision Claude took can be undone")
+        raise ValueError("only an answered decision can be undone")
     db.execute("UPDATE messages SET undone=1 WHERE id=?", (msg_id,))
     thread = db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
     body = (f'Kelvin reversed your decision "{msg["answer"]}" on "{msg["text"]}". '
@@ -517,6 +545,11 @@ def tick(db, *, at: datetime | None = None, sender=None) -> str:
                     thread_url(top["thread"]) if len(release) == 1 else f"{config.SETTINGS.app.base_url}/app",
                     sender=sender)
         said.append(f"released {len(release)} held")
+    # An answer whose worker died in its undo window (dashboard restart) still goes.
+    for m in db.execute("SELECT id FROM messages WHERE state='held' AND answered_at < ?",
+                        (_iso(t - timedelta(seconds=UNDO_SECONDS * 3)),)).fetchall():
+        _send_answer(db, m["id"])
+        said.append(f"sent held answer {m['id']}")
     cutoff = _iso(t - timedelta(days=QUIET_DAYS))
     for th in db.execute("SELECT * FROM threads WHERE status='open' AND updated < ?", (cutoff,)).fetchall():
         asked = db.execute("SELECT 1 FROM messages WHERE thread=? AND kind='close?' AND answer IS NULL",
