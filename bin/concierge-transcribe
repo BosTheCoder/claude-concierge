@@ -9,9 +9,15 @@
 # OpenRouter, which accepts audio inline. Prints the transcript on stdout.
 set -euo pipefail
 
+# Before parsing: it re-execs this script with "$@", so a shift would be lost.
+# shellcheck disable=SC1091
+source "$HOME/.claude/lib/load-secrets.sh"
+
 PROMPT="Transcribe this voice note verbatim. Output only the transcript text, nothing else."
+MODEL="google/gemini-2.5-flash"
 if [[ "${1:-}" == "--timestamps" ]]; then
-  PROMPT="Transcribe this recording verbatim. Start each sentence on a new line with its [mm:ss] start time. Output only the transcript, nothing else. If nobody speaks, output (silence)."
+  PROMPT='Transcribe the audio above with timestamps. Put each sentence on its own line, prefixed with its start time in [mm:ss] format, e.g. "[00:03] Hello there." Output only those lines. If nobody speaks, output (silence).'
+  MODEL="google/gemini-3.8-flash"  # hears "Claude" where 2.5 wrote "cloud"
   shift
 fi
 if [[ $# -ne 1 ]]; then
@@ -22,22 +28,20 @@ fi
 AUDIO="$1"
 [[ -r "$AUDIO" ]] || { echo "concierge-transcribe: cannot read $AUDIO" >&2; exit 1; }
 
-# shellcheck disable=SC1091
-source "$HOME/.claude/lib/load-secrets.sh"
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 ffmpeg -y -loglevel error -i "$AUDIO" -vn -ar 16000 -ac 1 -b:a 64k "$TMP/voice.mp3"
 
-PROMPT="$PROMPT" python3 - "$TMP/voice.mp3" <<'PY'
+PROMPT="$PROMPT" MODEL="$MODEL" python3 - "$TMP/voice.mp3" <<'PY'
 import base64, json, os, sys, urllib.error, urllib.request
 
 audio = base64.b64encode(open(sys.argv[1], "rb").read()).decode()
 body = {
-    "model": "google/gemini-2.5-flash",
+    "model": os.environ["MODEL"],
     "messages": [{"role": "user", "content": [
-        {"type": "text", "text": os.environ["PROMPT"]},
+        # Audio first: with the instruction first, Gemini dropped the [mm:ss] stamps (2026-11-17).
         {"type": "input_audio", "input_audio": {"data": audio, "format": "mp3"}},
+        {"type": "text", "text": os.environ["PROMPT"]},
     ]}],
 }
 req = urllib.request.Request(
