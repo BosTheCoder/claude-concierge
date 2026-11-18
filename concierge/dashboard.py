@@ -365,10 +365,30 @@ def ticktick_update(headers, raw: bytes, *, writer=None) -> tuple[int, dict]:
 def recent_jobs(hours: int = 24, *, load=None) -> list[dict]:
     """What the page's tray lists: jobs opened in the last day, newest first."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
-    jobs = [j for j in (load or registry.load)().values() if (j.get("opened_at") or "") >= cutoff]
+    jobs = [j for j in (load or registry.load)().values()
+            if (j.get("opened_at") or "") >= cutoff and not j.get("tray_hidden")]
     jobs.sort(key=lambda j: j.get("opened_at") or "", reverse=True)
     keep = ("id", "title", "status", "rc_url", "error", "opened_at")
     return [{k: j.get(k) for k in keep} for j in jobs[:15]]
+
+
+def tray_remove(raw: bytes) -> tuple[int, dict]:
+    """The tray's x: hide a chat from it, and with stop=true also close a running chat's window.
+    Hiding never touches the session; the chat stays open on claude.ai and in /jobs."""
+    try:
+        body = json.loads(raw or b"{}")
+        job_id = str(body["id"])
+    except (ValueError, KeyError, TypeError):
+        return 400, {"ok": False, "error": "need id"}
+    with REGISTRY_LOCK:
+        job = registry.load().get(job_id)
+        if not job:
+            return 404, {"ok": False, "error": f"unknown job: {job_id}"}
+        if body.get("stop") and job.get("status") == "running":
+            tmuxctl.kill_window(config.TMUX_SESSION, job["tmux_window"])
+            registry.upsert(job_id, status="killed")
+        registry.upsert(job_id, touch=False, tray_hidden=True)
+    return 200, {"ok": True}
 
 
 def handler_for(sampler: Sampler):
@@ -552,6 +572,10 @@ def handler_for(sampler: Sampler):
                     return
                 handle = task_chat_request if self._route() == "/api/task-chat" else ticktick_update
                 self._json(*handle(self.headers, self.rfile.read(length)))
+                return
+            if self._route() == "/api/jobs/remove":
+                length = int(self.headers.get("Content-Length") or 0)
+                self._json(*tray_remove(self.rfile.read(min(length, MAX_BODY))))
                 return
             if self._route() == "/api/recording":
                 self._json(*recording_request(self))

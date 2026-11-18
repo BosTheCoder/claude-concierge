@@ -33,6 +33,12 @@
     align-items:center; justify-content:space-between; font-weight:700; cursor:pointer }
   .cl-tray ul { list-style:none; margin:0; padding:0 6px 6px; max-height:50dvh; overflow:auto }
   .cl-tray.cl-shut ul { display:none }
+  .cl-tray li { display:flex; align-items:center; gap:2px }
+  .cl-tray li > a, .cl-tray li > span { flex:1; min-width:0 }
+  .cl-tray li > button { all:unset; box-sizing:border-box; min-width:36px; min-height:44px; padding:0 8px; border-radius:10px;
+    text-align:center; color:var(--mute, GrayText); font-size:13px; cursor:pointer }
+  .cl-tray li > button:hover { background:var(--line, #8882) }
+  .cl-tray li > .cl-stop { color:var(--red, #e5484d); font-weight:600 }
   .cl-tray li a, .cl-tray li > span { display:block; padding:8px; border-radius:10px; color:inherit; text-decoration:none }
   .cl-tray li a:hover { background:var(--line, #8882) }
   .cl-tray .cl-n { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
@@ -98,6 +104,7 @@
       el.setAttribute("aria-label", "Claude chats");
       el.innerHTML = `<button type="button" aria-expanded="true"><span>✦ Chats</span><span class="cl-c"></span></button><ul></ul>`;
       el.querySelector("button").onclick = () => open(el.classList.contains("cl-shut"));
+      el.querySelector("ul").onclick = e => { const b = e.target.closest("button"); if (b) remove(b); };
       document.body.append(el);
       open(!shut, false);
     }
@@ -109,10 +116,24 @@
     }
     function row(j) {
       const name = `<span class="cl-n">[${esc(j.id)}] ${esc(j.title)}</span>`;
-      if (j.status === "failed") return `<li class="cl-bad"><span>${name}<span class="cl-s">Failed: ${esc(j.error || "see Telegram")}</span></span></li>`;
+      // × only hides it from here; Stop also closes a running chat.
+      const btns = (j.status === "running" ? `<button type="button" class="cl-stop" data-stop="${esc(j.id)}" aria-label="Stop ${esc(j.id)}">Stop</button>` : "")
+        + `<button type="button" data-hide="${esc(j.id)}" aria-label="Remove ${esc(j.id)} from list">✕</button>`;
+      if (j.status === "failed") return `<li class="cl-bad"><span>${name}<span class="cl-s">Failed: ${esc(j.error || "see Telegram")}</span></span>${btns}</li>`;
       if (/^https:\/\//.test(j.rc_url || ""))
-        return `<li><a href="${esc(j.rc_url)}" target="_blank" rel="noopener">${name}<span class="cl-s">Open chat ›${j.status === "running" ? "" : " · " + esc(j.status)}</span></a></li>`;
-      return `<li><span>${name}<span class="cl-s">${j.status === "running" ? "Starting…" : esc(j.status)}</span></span></li>`;
+        return `<li><a href="${esc(j.rc_url)}" target="_blank" rel="noopener">${name}<span class="cl-s">Open chat ›${j.status === "running" ? "" : " · " + esc(j.status)}</span></a>${btns}</li>`;
+      return `<li><span>${name}<span class="cl-s">${j.status === "running" ? "Starting…" : esc(j.status)}</span></span>${btns}</li>`;
+    }
+    async function remove(b) {
+      const stop = !!b.dataset.stop, id = b.dataset.stop || b.dataset.hide;
+      if (stop && b.textContent !== "Sure?") { b.textContent = "Sure?"; return; }  // two taps to stop a live chat
+      b.closest("li").style.opacity = ".4";
+      try {
+        const r = await fetch("/claude/api/jobs/remove", {method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id, stop})});
+        if (!r.ok) throw 0;
+      } catch { b.closest("li").style.opacity = ""; return; }
+      refresh();
     }
     async function refresh() {
       clearTimeout(timer);

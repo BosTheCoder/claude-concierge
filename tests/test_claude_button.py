@@ -160,3 +160,22 @@ def test_a_bad_body_length_gets_an_answer_not_a_hang(server):
     conn.putheader("Content-Length", "-1")
     conn.endheaders()
     assert conn.getresponse().status == 400 and calls == []
+
+
+def test_tray_x_hides_a_chat_and_stop_also_closes_its_window(server, monkeypatch, tmp_path):
+    base, _ = server
+    monkeypatch.setattr(dashboard.config, "STATE_FILE", tmp_path / "jobs.json")
+    killed = []
+    monkeypatch.setattr(dashboard.tmuxctl, "kill_window", lambda s, w: killed.append(w))
+    now = "2099-01-01T00:00:00+00:00"
+    for jid in ("A1", "B2"):
+        registry.upsert(jid, status="running", tmux_window=f"w{jid}", title=jid, opened_at=now)
+
+    assert post(base + "/claude/api/jobs/remove", {"id": "A1"})[0] == 200
+    assert post(base + "/claude/api/jobs/remove", {"id": "B2", "stop": True})[0] == 200
+
+    assert dashboard.recent_jobs() == []
+    jobs = registry.load()
+    assert killed == ["wB2"]
+    assert jobs["A1"]["status"] == "running" and jobs["B2"]["status"] == "killed"
+    assert post(base + "/claude/api/jobs/remove", {"id": "ZZ"})[0] == 404
