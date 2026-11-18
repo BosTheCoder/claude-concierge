@@ -237,7 +237,7 @@ def spawn_request(headers, raw: bytes, *, spawner=None, last_chat=None) -> tuple
 
 
 def recording_request(handler) -> tuple[int, dict]:
-    """POST /api/recording: an mp4 from the screen-to-claude phone app, note in ?note=.
+    """POST /api/recording: an mp4 (or, as application/zip, images) from the screen-to-claude phone app, note in ?note=.
 
     Answers once the file is on disk; frames, transcript and the job follow in the
     background, so the phone isn't held for a minute of prep."""
@@ -255,7 +255,8 @@ def recording_request(handler) -> tuple[int, dict]:
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
     note = (query.get("note") or [""])[0][:SPAWN_LIMITS["note"]].strip()
     try:
-        folder = recording.save(handler.rfile, length)
+        folder = recording.save(handler.rfile, length,
+                                zipped=(handler.headers.get("Content-Type") or "").startswith("application/zip"))
     except (ValueError, OSError) as exc:
         return 400, {"ok": False, "error": str(exc)}
 

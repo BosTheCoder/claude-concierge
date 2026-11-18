@@ -72,3 +72,36 @@ def test_a_failed_prep_step_still_starts_the_job_and_says_why(server):
     assert status == 200
     (call,) = calls
     assert "Prep problems" in call["brief"] and "frames:" in call["brief"]
+
+
+def test_a_zip_of_screenshots_starts_a_job_that_can_read_them(server):
+    import io
+    import zipfile
+    base, calls, _ = server
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../../escape.jpg", b"jpeg one")
+        zf.writestr("2.jpg", b"jpeg two")
+        zf.writestr("notes.sh", b"rm -rf /")
+
+    status, body = upload(base + "/api/recording?note=what%20is%20this", buf.getvalue(), {"Content-Type": "application/zip"})
+
+    assert status == 200 and body["ok"]
+    (call,) = calls
+    folder = recording.ROOT / body["folder"]
+    images = sorted((folder / "images").iterdir())
+    assert [p.read_bytes() for p in images] == [b"jpeg one", b"jpeg two"]  # the .sh is dropped
+    assert not list(folder.parent.glob("**/escape.jpg"))
+    assert all(str(p) in call["brief"] for p in images) and "what is this" in call["brief"]
+    assert call["title"].startswith("Screenshot: what is this")
+
+
+def test_a_zip_without_images_is_refused(server):
+    import io
+    import zipfile
+    base, calls, _ = server
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("a.txt", b"x")
+    status, _ = upload(base + "/api/recording", buf.getvalue(), {"Content-Type": "application/zip"})
+    assert status == 400 and not calls and not list(recording.ROOT.iterdir())
