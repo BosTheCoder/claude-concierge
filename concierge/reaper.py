@@ -514,8 +514,14 @@ def run(
         # Archiving a chat in the app does not stop this window, and the next
         # thing it reports (a new commit in its repo is enough) un-archives it.
         # Archive is him saying "done", so it overrides the guards in `decide`.
+        # A "running" row is often stale (J0 sat idle 33h saying running), so
+        # only CPU, not the row, can say it is mid-turn.
+        rate = cpu_rate(previous.get(job_id), ticks, elapsed)
         if (
-            job.get("status") != "running"
+            (
+                job.get("status") != "running"
+                or (rate is not None and rate <= BUSY_TICKS_PER_SECOND)
+            )
             and command
             and "claude" in command
             and archived(job, pid)
@@ -536,7 +542,7 @@ def run(
         decision = decide(
             job,
             now=now,
-            rate=cpu_rate(previous.get(job_id), ticks, elapsed),
+            rate=rate,
             pane_command=command,
             settings=settings,
         )
@@ -670,7 +676,7 @@ def report(*, now: datetime | None = None, registry_path: Path | None = None) ->
         decision = decide(
             job,
             now=now,
-            rate=cpu_rate(previous.get(job_id), ticks, elapsed),
+            rate=rate,
             pane_command=command,
         )
         lines.append(

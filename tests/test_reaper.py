@@ -499,3 +499,28 @@ def test_run_closes_a_chat_archived_in_the_app_even_when_guards_would_spare_it(
 
     assert tmux.killed == ["D9"]  # a running job is never cut off mid-turn
     assert registry.load(state)["D9"]["status"] == "reaped"
+
+
+def test_archive_closes_an_idle_job_still_marked_running(tmp_path, monkeypatch, wrote_nothing):
+    # J0 sat idle at its prompt for 33h with a stale "running" row, so every
+    # archive in the app was undone by its next report.
+    state, cpu = tmp_path / "jobs.json", tmp_path / "reaper.json"
+    registry.save(
+        {
+            "J0": job(id="J0", tmux_window="J0", status="running"),
+            "W1": job(id="W1", tmux_window="W1", status="running"),
+        },
+        state,
+    )
+    earlier = (NOW - timedelta(minutes=5)).isoformat()
+    cpu.write_text(json.dumps({"cpu": {"J0": 900, "W1": 0}, "ranAt": earlier}))  # W1: 3 ticks/s
+    monkeypatch.setattr(reaper, "pane_pid", lambda s, w, tmux=None: 4242)
+    monkeypatch.setattr(reaper, "cpu_ticks", lambda pid: 900)
+    tmux = FakeTmux({"J0": "claude", "W1": "claude"})
+
+    reaper.run(
+        now=NOW, registry_path=state, cpu_path=cpu, tmux=tmux,
+        logger=lambda *a: None, archived=lambda j, pid: True,
+    )
+
+    assert tmux.killed == ["J0"]  # W1 is busy mid-turn, so it stays
