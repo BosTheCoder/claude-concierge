@@ -676,7 +676,7 @@ def report(*, now: datetime | None = None, registry_path: Path | None = None) ->
         decision = decide(
             job,
             now=now,
-            rate=rate,
+            rate=cpu_rate(previous.get(job_id), ticks, elapsed),
             pane_command=command,
         )
         lines.append(
