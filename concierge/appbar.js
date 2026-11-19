@@ -3,6 +3,16 @@
 // That also points the page at the app's manifest, so installing from any pane installs the one app.
 // Fixed-bottom things on a page sit above the bar with bottom: calc(var(--appbar, 0px) + ...).
 (() => {
+  // Ctrl/Cmd+Enter in a text box presses the main button after it (Send, Start, Save), on every pane.
+  addEventListener("keydown", e => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.isComposing || !e.target.matches?.("textarea, input")) return;
+    if (e.target.form) { e.preventDefault(); e.target.form.requestSubmit(); return; }
+    for (let el = e.target.parentElement; el; el = el.parentElement) {
+      const b = [...el.querySelectorAll("button.btn:not(.ghost)")]
+        .find(b => !b.disabled && e.target.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      if (b) { e.preventDefault(); b.click(); return; }
+    }
+  });
   if (location.port || document.getElementById("appbar")) return;  // :18787 etc. are other addresses
   // Every pane, by id. Which sit in the bar, in what order, is his: Concierge → Settings → Bottom bar
   // saves {order, main} to the concierge (kv "appbar"); this page keeps a copy so the bar draws at once.

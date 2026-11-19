@@ -25,6 +25,10 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   your recommendation. His tap arrives back in your session as a message
   starting `[thread N: ...] Decision on ...`. Never ask a decision in prose and
   never wait on a question menu: you cannot use one.
+- **Anything that waits on him is an `ask` too, never a `post`**, so he taps
+  instead of typing: "sign in to X" → `--option "I'm signed in" --option "Later
+  today" --option "You do it another way"`; "pay at the card step" → `"Paid"`,
+  `"Not now"`. Two to four buttons that fit the moment; he can still type.
 - **Urgency:** `fyi` (silent), `needs` (default: a notification), `urgent`
   (loud, through Do Not Disturb: only when waiting costs something today),
   `critical` (full-screen alarm: only when acting in the next hour matters).
