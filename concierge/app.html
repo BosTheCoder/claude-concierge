@@ -54,6 +54,8 @@
   .ask.mail label { display:block; font-size:12px; color:var(--dim); margin:8px 0 2px; }
   .ask.mail input, .ask.mail select { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
   .ask.mail .body { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:10px; min-height:5em; outline:none; }
+  .ask.mail textarea.body { width:100%; resize:vertical; font:inherit; color:inherit; display:block; }
+  .chathead { margin:2px 0 4px; } .chathead b { font-weight:600; }
   .ask.mail .body:focus { border-color:var(--blue); } .ask.mail .body p { margin:0 0 .7em; }
   .ask.mail .muted { margin-top:6px; }
   .convo { margin:6px 0 4px; display:flex; flex-direction:column; gap:6px; }
@@ -229,7 +231,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => m.kind === "draft" ? mailCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
@@ -259,7 +261,7 @@ async function thread(id, quiet) {
     card.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => { const k = b.dataset.ui;
       s.ui.has(k) ? s.ui.delete(k) : s.ui.add(k); lastSig = ""; thread(current.id, true); });
     card.querySelectorAll("details[data-uid]").forEach(dt => dt.ontoggle = () => dt.open ? s.ui.add(dt.dataset.uid) : s.ui.delete(dt.dataset.uid)); });
-  $("#main").querySelectorAll("[data-mailsend]").forEach(b => b.onclick = () => sendMail(+b.dataset.mailsend, b));
+  $("#main").querySelectorAll("[data-mailsend]").forEach(b => b.onclick = () => sendCard(+b.dataset.mailsend, b));
   $("#main").querySelectorAll("[data-mailretry]").forEach(b => b.onclick = () => { delete mails[b.dataset.mailretry]; lastSig = ""; thread(current.id); });
   $("#main").querySelectorAll("[data-explain]").forEach(b => b.onclick = () =>
     send("Explain this one: what it relates to, and what each option leads to and costs.", +b.dataset.explain));
@@ -279,7 +281,7 @@ function fold(m, key, label) {
 function opts(m) {
   if (!m.options) return "";
   if (m.answer !== null && m.answer !== undefined)
-    return m.kind === "draft" ? `<div class="answered${m.answered_by === "withdrawn" ? " withdrawn" : ""}">${esc(m.answer)}</div>`
+    return m.kind === "draft" || m.kind === "chat" ? `<div class="answered${m.answered_by === "withdrawn" ? " withdrawn" : ""}">${esc(m.answer)}</div>`
       : m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
       : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
@@ -288,23 +290,38 @@ function opts(m) {
 }
 // An email a job drafted: he can change From, To, Cc, Subject and the text, then Send (two taps).
 // Loaded from Gmail once per visit; his edits live here, so a redraw while he types keeps them.
+// Cards for something he sends himself: an email (kind "draft") or a chat message (kind "chat").
+// Loaded once per visit; his edits live here, so a redraw while he types keeps them.
 const mails = {}, mailLoading = new Set();
-function mailCard(m) {
-  const s = mails[m.id], head = `<div class="who"><span class="dot ${m.urgency}"></span> Email to send · ${age(m.created)}</div>`;
+const when = v => { const t = new Date(v); return isNaN(t) ? esc(v) : t.toLocaleString([], {weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}); };
+// One message of what he's replying to; long ones clipped behind "Show all".
+function bubble(s, k, x) {
+  const long = x.text.length > 600 || x.text.split("\n").length > 12, open = s.ui.has(k);
+  return `<div class="em ${x.mine ? "mine" : ""}"><div class="emh"><b>${esc(x.who)}</b> · ${when(x.at)}</div>
+    <div class="emt ${long && !open ? "clamp" : ""}">${linkify(x.text)}</div>${long ? `<button class="more" data-ui="${k}">${open ? "Show less" : "Show all"}</button>` : ""}</div>`;
+}
+// Newest `keep` open, the rest folded.
+function convo(s, items, keep, noun) {
+  if (!items.length) return "";
+  const older = items.slice(0, -keep), recent = items.slice(-keep), n = older.length;
+  return `<div class="convo"><div class="lbl">Replying to</div>
+    ${n ? `<details data-uid="older" ${s.ui.has("older") ? "open" : ""}><summary>${n} earlier ${noun}${n === 1 ? "" : "s"}</summary>${older.map((x, i) => bubble(s, `e${i}`, x)).join("")}</details>` : ""}
+    ${recent.map((x, i) => bubble(s, `e${n + i}`, x)).join("")}</div>`;
+}
+function cardShell(m, label, loading) {
+  const s = mails[m.id], head = `<div class="who"><span class="dot ${m.urgency}"></span> ${label} · ${age(m.created)}</div>`;
   const about = `<button class="btn ghost" data-about="${m.id}">Ask Claude to change it</button>`;
-  if (!s) { loadMail(m.id); return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">Loading from Gmail…</p></div>`; }
-  if (s.err) return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">⚠ ${esc(s.err)}</p>
-    <div class="askrow"><button class="btn ghost" data-mailretry="${m.id}">Try again</button>${about}</div></div>`;
-  const {d, e} = s, th = d.thread || [], mine = new Set(d.aliases.map(a => a.email.toLowerCase()));
-  const when = v => { const t = new Date(v); return isNaN(t) ? esc(v) : t.toLocaleString([], {weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}); };
-  const em = (x, i) => { const k = `e${i}`, long = x.text.length > 600 || x.text.split("\n").length > 12, open = s.ui.has(k);
-    return `<div class="em ${mine.has(x.email.toLowerCase()) ? "mine" : ""}"><div class="emh"><b>${esc(x.from)}</b> · ${when(x.date)}</div>
-      <div class="emt ${long && !open ? "clamp" : ""}">${linkify(x.text)}</div>${long ? `<button class="more" data-ui="${k}">${open ? "Show less" : "Show all"}</button>` : ""}</div>`; };
-  const older = th.slice(0, -1);
-  const convo = th.length ? `<div class="convo"><div class="lbl">Replying to</div>
-    ${older.length ? `<details data-uid="older" ${s.ui.has("older") ? "open" : ""}><summary>${older.length} earlier email${older.length === 1 ? "" : "s"}</summary>${older.map(em).join("")}</details>` : ""}
-    ${em(th[th.length - 1], th.length - 1)}</div>` : "";
-  return `<div class="ask mail" data-mail="${m.id}">${head}${convo}
+  if (!s) { loadCard(m.id, m.kind); return [null, `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">${loading}</p></div>`]; }
+  if (s.err) return [null, `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">⚠ ${esc(s.err)}</p>
+    <div class="askrow"><button class="btn ghost" data-mailretry="${m.id}">Try again</button>${about}</div></div>`];
+  return [s, head, about];
+}
+function mailCard(m) {
+  const [s, head, about] = cardShell(m, "Email to send", "Loading from Gmail…");
+  if (!s) return head;
+  const {d, e} = s, mine = new Set(d.aliases.map(a => a.email.toLowerCase()));
+  const items = (d.thread || []).map(x => ({who: x.from, at: x.date, text: x.text, mine: mine.has(x.email.toLowerCase())}));
+  return `<div class="ask mail" data-mail="${m.id}">${head}${convo(s, items, 1, "email")}
     <label>From</label><select data-f="from">${d.aliases.map(a => `<option value="${esc(a.email)}" ${a.email === e.from ? "selected" : ""}>${esc(a.email)}${a.name ? ` · ${esc(a.name)}` : ""}</option>`).join("")}</select>
     <label>To</label><input data-f="to" value="${esc(e.to)}" autocomplete="off">
     <label>Cc</label><input data-f="cc" value="${esc(e.cc)}" autocomplete="off">
@@ -312,33 +329,49 @@ function mailCard(m) {
     <div class="body" contenteditable="true" data-f="html">${e.html}</div>
     ${d.reply ? `<div class="muted">The earlier emails stay quoted underneath, as in Gmail.</div>` : ""}
     ${d.attachments.length ? `<div class="muted">📎 ${d.attachments.map(esc).join(", ")}</div>` : ""}
-    <div class="askrow"><button class="btn" data-mailsend="${m.id}">Send email</button><a class="btn ghost" href="${esc(d.gmail)}" target="_blank" rel="noopener">Open in Gmail</a></div>
+    <div class="askrow"><button class="btn" data-mailsend="${m.id}" data-kind="draft">Send email</button><a class="btn ghost" href="${esc(d.gmail)}" target="_blank" rel="noopener">Open in Gmail</a></div>
     <div class="askrow">${about}</div></div>`;
 }
-async function loadMail(id) {
+const NET = {whatsapp:"WhatsApp", telegram:"Telegram", signal:"Signal", instagram:"Instagram", facebook:"Messenger", messenger:"Messenger",
+  imessage:"iMessage", sms:"SMS", linkedin:"LinkedIn", googlemessages:"SMS", discord:"Discord", slack:"Slack"};
+function chatCard(m) {
+  const [s, head, about] = cardShell(m, "Message to send", "Loading the chat…");
+  if (!s) return head;
+  const {d, e} = s, net = NET[(d.network || "").toLowerCase()] || d.network;
+  const items = d.messages.map(x => ({who: x.from, at: x.ts, text: x.text, mine: x.mine}));
+  return `<div class="ask mail" data-mail="${m.id}">${head}<div class="chathead"><b>${esc(d.title)}</b>${net ? ` · ${esc(net)}` : ""}</div>
+    ${convo(s, items, 6, "message")}
+    <textarea class="body" data-f="text" rows="${Math.min(12, Math.max(3, e.text.split("\n").length + 1))}">${esc(e.text)}</textarea>
+    <div class="askrow"><button class="btn" data-mailsend="${m.id}" data-kind="chat">Send message</button><a class="btn ghost" href="${esc(d.inbox)}" target="_blank" rel="noopener">Open in Inbox</a></div>
+    <div class="askrow">${about}</div></div>`;
+}
+async function loadCard(id, kind) {
   if (mailLoading.has(id)) return; mailLoading.add(id);
-  try { const d = await api(`threads/${current.id}/draft?msg=${id}`);
-    mails[id] = {d, ui: new Set(), e: {from: d.from, to: d.to, cc: d.cc, subject: d.subject, html: d.html}}; }
+  try { const d = await api(`threads/${current.id}/${kind}?msg=${id}`);
+    mails[id] = {d, kind, ui: new Set(), e: kind === "chat" ? {text: d.draft}
+      : {from: d.from, to: d.to, cc: d.cc, subject: d.subject, html: d.html}}; }
   catch (err) { mails[id] = {err: err.message}; }
   mailLoading.delete(id); lastSig = ""; thread(current.id, true);
 }
-async function sendMail(id, b) {
-  const s = mails[id];
+async function sendCard(id, b) {
+  const s = mails[id], chat = s.kind === "chat", label = chat ? "Send message" : "Send email";
   if (!s.armed) { s.armed = true; b.textContent = "Tap again to send";
-    setTimeout(() => { s.armed = false; if (b.isConnected && !b.disabled) b.textContent = "Send email"; }, 4000); return; }
+    setTimeout(() => { s.armed = false; if (b.isConnected && !b.disabled) b.textContent = label; }, 4000); return; }
   s.armed = false; b.disabled = true; b.textContent = "Sending…";
   const {d, e} = s;
-  try { const r = await api(`threads/${current.id}/sendemail`, {msg: id, from: e.from, to: e.to, cc: e.cc, subject: e.subject,
-      ...(e.html !== d.html && {html: e.html})}, `Send email “${e.subject}”`);
-    toast(r.queued ? "No signal: the email sends when you're back online" : `Sent from ${e.from}`);
+  try { const r = chat
+      ? await api(`threads/${current.id}/sendchat`, {msg: id, text: e.text}, `Message to ${d.title}`)
+      : await api(`threads/${current.id}/sendemail`, {msg: id, from: e.from, to: e.to, cc: e.cc, subject: e.subject,
+          ...(e.html !== d.html && {html: e.html})}, `Send email “${e.subject}”`);
+    toast(r.queued ? "No signal: it sends when you're back online" : chat ? `Sent to ${d.title}` : `Sent from ${e.from}`);
     if (!r.queued) delete mails[id];
     lastSig = ""; thread(current.id); }
-  catch (err) { toast(err.message); b.disabled = false; b.textContent = "Send email"; }
+  catch (err) { toast(err.message); b.disabled = false; b.textContent = label; }
 }
 function msg(m) {
   const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
   const states = {sent:"✓ sent", picked:"✓✓ picked up", acted:"✓✓ acted on", failed:"⚠ not delivered: " + (m.error || "")};
-  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
+  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${m.kind === "chat" && m.body && m.answer ? `<div class="em mine" style="margin-top:6px">${linkify(m.body)}</div>` : ""}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
 }
 async function act(action, body) {
   try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }

@@ -21,6 +21,7 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
     {{CONCIERGE_BIN}} facts "Money=£400" "Due=Fri 21 Nov" "Who=Drury's"
     {{CONCIERGE_BIN}} close --note "<one line of outcome>"
     {{CONCIERGE_BIN}} draft <gmail-draft-id>             # an email he edits and sends in the app
+    {{CONCIERGE_BIN}} message '<chat-id>' "<text>"        # a chat message he edits and sends in the app
 
 - **Decisions are always `ask`**, with the options as short button labels and
   your recommendation. His tap arrives back in your session as a message
@@ -35,6 +36,12 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   To, Subject and the text, and Send. Don't also paste the text in a `post`.
   His send comes back as a message; don't send it yourself. If he asks for
   changes, edit the draft and run `draft` again: the card is replaced.
+- **A chat message for him to send** (WhatsApp or anything on Beeper):
+  `{{CONCIERGE_BIN}} message '<chat-id>' "<text>"`, with the chat's matrix id
+  (`!xxxx:beeper.local`). The text must be finished: his voice (bos-voice),
+  scrubbed (avoid-ai-writing). He sees the recent chat, edits, and sends; you
+  hear back with the final text. Don't send it yourself. Run it again to
+  replace the draft.
 - **Urgency:** `fyi` (silent), `needs` (default: a notification), `urgent`
   (loud, through Do Not Disturb: only when waiting costs something today),
   `critical` (full-screen alarm: only when acting in the next hour matters).

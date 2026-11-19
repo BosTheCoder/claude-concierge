@@ -12,7 +12,7 @@ import re
 import threading
 from pathlib import Path
 
-from concierge import config, emaildraft, inbox_waiting, registry, spawn, threads
+from concierge import chatdraft, config, emaildraft, inbox_waiting, registry, spawn, threads
 
 APP_HTML = Path(__file__).with_name("app.html")
 ROUTE = re.compile(r"^/api/threads/(\d+)(?:/(\w+))?$")
@@ -73,15 +73,17 @@ def get(path: str, query: dict) -> tuple[int, dict]:
             q = (query.get("q") or [""])[0][:200]
             return 200, {"threads": threads.home(db, q=q, closed=bool(query.get("closed"))), "brief": brief(),
                          "mode": (m := threads.active_mode(db)) and m["name"]}
-        if (m := ROUTE.match(path)) and m.group(2) == "draft":
-            msg = db.execute("SELECT ref FROM messages WHERE id=? AND thread=? AND kind='draft'",
-                             (int((query.get("msg") or ["0"])[0]), int(m.group(1)))).fetchone()
+        if (m := ROUTE.match(path)) and m.group(2) in ("draft", "chat"):
+            msg = db.execute("SELECT ref, body FROM messages WHERE id=? AND thread=? AND kind=?",
+                             (int((query.get("msg") or ["0"])[0]), int(m.group(1)), m.group(2))).fetchone()
             if not msg:
-                return 404, {"error": "no such email"}
+                return 404, {"error": "no such card"}
             try:
+                if m.group(2) == "chat":
+                    return 200, chatdraft.load(msg["ref"]) | {"draft": msg["body"] or ""}
                 return 200, emaildraft.load(msg["ref"])
             except RuntimeError as exc:
-                return 502, {"error": f"Gmail: {exc}"}
+                return 502, {"error": str(exc) if m.group(2) == "chat" else f"Gmail: {exc}"}
         if m := ROUTE.match(path):
             try:
                 d = threads.detail(db, int(m.group(1)))
@@ -192,20 +194,32 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
             threads._decision(db, msg)  # refuse now (400) rather than on the worker
             _bg(threads.answer, msg, choice, note=_text(body, "note", required=False),
                 grace=threads.UNDO_SECONDS)
-        elif action == "sendemail":
+        elif action in ("sendemail", "sendchat"):
             msg, _ = threads._decision(db, int(body["msg"]))
-            if msg["kind"] != "draft" or msg["thread"] != tid:
-                return 400, {"ok": False, "error": "not an email in this thread"}
-            html = body.get("html")
-            if html is not None and (not isinstance(html, str) or len(html) > 200_000 or not html.strip()):
-                return 400, {"ok": False, "error": "the email text is empty or too long"}
-            sender, to = _text(body, "from"), _text(body, "to", required=False)
+            if msg["kind"] != ("draft" if action == "sendemail" else "chat") or msg["thread"] != tid:
+                return 400, {"ok": False, "error": "not that kind of card in this thread"}
             try:
-                emaildraft.send(msg["ref"], sender=sender, to=to, cc=_text(body, "cc", required=False),
-                                subject=_text(body, "subject", required=False), html=html)
+                if action == "sendchat":
+                    text = _text(body, "text")
+                    chatdraft.send(msg["ref"], text)
+                    db.execute("UPDATE messages SET body=? WHERE id=?", (text, msg["id"]))  # what went
+                    edited = text != (msg["body"] or "").strip()
+                    answer = "Sent"
+                    told = (f'Kelvin sent the message to {msg["text"].removeprefix("Message to ")}'
+                            f'{", after editing it, as: " + text if edited else ", as you drafted it."}')
+                else:
+                    html = body.get("html")
+                    if html is not None and (not isinstance(html, str) or len(html) > 200_000 or not html.strip()):
+                        return 400, {"ok": False, "error": "the email text is empty or too long"}
+                    sender, to = _text(body, "from"), _text(body, "to", required=False)
+                    emaildraft.send(msg["ref"], sender=sender, to=to, cc=_text(body, "cc", required=False),
+                                    subject=_text(body, "subject", required=False), html=html)
+                    answer = f"Sent from {sender}"
+                    told = (f'Kelvin sent the email "{msg["text"]}" (Gmail draft {msg["ref"]}) from {sender} to {to}'
+                            f'{", after editing it." if html is not None else ", as you drafted it."}')
             except RuntimeError as exc:
-                return 502, {"ok": False, "error": f"Gmail: {exc}"}
-            _bg(threads.email_sent, msg["id"], sender=sender, to=to, edited=html is not None)
+                return 502, {"ok": False, "error": str(exc)}
+            _bg(threads.card_sent, msg["id"], answer=answer, told=told)
         elif action == "undo":
             _bg(threads.undo, int(body["msg"]))
         elif action == "close":

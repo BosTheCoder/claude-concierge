@@ -718,6 +718,33 @@ def draft_cmd(
     _nudge_summary(th)
 
 
+@app.command("message")
+def message_cmd(
+    chat_id: str = typer.Argument(..., help="Beeper chat id, matrix form: !xxxx:beeper.local"),
+    text: str = typer.Argument(..., help="Your draft, finished: in his voice and scrubbed"),
+    thread: str = typer.Option(None),
+    urgency: str = typer.Option("needs"),
+):
+    """Hand him a chat message to send (WhatsApp, Telegram, anything on Beeper): a card in the app
+    with the recent conversation and your draft, which he can edit and Send. His send comes back to
+    you as a message, with the final text if he changed it. Run it again to replace the draft."""
+    from concierge import chatdraft, threads
+
+    try:
+        c = chatdraft.load(chat_id)
+    except RuntimeError as exc:
+        raise typer.BadParameter(f"can't read chat {chat_id}: {exc}") from None
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        mid = threads.post(db, th, f"Message to {c['title']}" + (f" ({c['network']})" if c["network"] else ""),
+                           urgency=urgency, kind="chat", options=["Send"], ref=chat_id, body=text)
+        for r in threads.open_decisions(db, th["id"]):
+            if r["kind"] == "chat" and r["ref"] == chat_id and r["id"] != mid:
+                threads.withdraw(db, r["id"], f"replaced by a new draft (decision {mid})")
+    typer.echo(f"message card in thread {th['id']} (decision {mid}); you'll hear when he sends it.")
+    _nudge_summary(th)
+
+
 @app.command("decisions")
 def decisions_cmd(thread: str = typer.Option(None)):
     """Your open decisions, oldest first: check none is stale before you ask another."""
