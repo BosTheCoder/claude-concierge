@@ -888,7 +888,7 @@ function flash(text, bad) {
 async function reap(pid, fingerprint) {
   busy = true;
   try {
-    const res = await fetch("/api/reap", {
+    const res = await fetch("api/reap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pid, fingerprint }),
@@ -987,7 +987,7 @@ function escapeHtml(s) {
 async function poll() {
   if (busy) return;
   try {
-    const res = await fetch("/api/sessions");
+    const res = await fetch("api/sessions");
     render(await res.json());
   } catch (e) {
     flash("lost the server — " + e, true);
