@@ -204,11 +204,12 @@ async function thread(id, quiet) {
   // Answered in the last half hour: kept up here so its Undo is one tap away.
   const recent = ms.filter(m => m.options && m.answered_at && m.answered_by !== "withdrawn" && !m.undone
     && (m.state === "offline" || Date.now() - new Date(m.answered_at) < 18e5) && !mine.includes(m)).reverse();
-  const shown = new Set([...open, ...recent, ...mine, ...(t.summary ? [] : lastJob && !lastJob.options ? [lastJob] : [])]);
+  // Claude's latest word always stays out of history: a summary can be stale, and the latest message is often the ask.
+  const latest = lastJob && !lastJob.options && !mine.includes(lastJob) ? lastJob : null;
+  const shown = new Set([...open, ...recent, ...mine, ...(latest ? [latest] : [])]);
   const past = ms.filter(m => !shown.has(m));
-  const top = t.summary
-    ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>`
-    : lastJob && !lastJob.options ? `<div class="summary"><div class="who">Latest from Claude · ${age(lastJob.created)}</div>${linkify(lastJob.text)}</div>` : "";
+  const top = (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>` : "")
+    + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}</div>` : "");
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
