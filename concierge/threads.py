@@ -290,7 +290,7 @@ _PANE_LOCKS: dict[str, threading.Lock] = {}
 def _deliver(pane: str | None, text: str, *, submitter=None) -> str | None:
     """None once it left the input box, else why not."""
     if not pane:
-        return "this thread has no session to send to"
+        return "the Concierge can't type into this chat (it was started from the Claude app): reply in its Claude chat, linked at the top"
     lock = _PANE_LOCKS.setdefault(pane, threading.Lock())
     with lock:  # two taps at once would type into each other
         return (submitter or tmuxctl.submit)(pane, text)

@@ -440,3 +440,10 @@ def test_send_will_not_press_enter_on_text_already_in_the_box(tmp_path):
                  sleeper=lambda s: None)
     assert pane.submitted == []
     assert pane.box == "half-typed reply"
+
+
+def test_a_session_started_from_the_claude_app_gets_no_pane():
+    # It inherits the remote-control server's pane; typing there reaches nobody.
+    env = {"CONCIERGE_THREAD_JOB": "hair", "CONCIERGE_THREAD_PANE": "rc:0.0"}
+    assert cli._thread_target("T", env)["pane"] == "rc:0.0"
+    assert cli._thread_target("T", {**env, "CLAUDE_CODE_ENVIRONMENT_KIND": "bridge"})["pane"] is None

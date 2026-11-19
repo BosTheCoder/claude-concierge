@@ -627,7 +627,11 @@ def _thread_target(thread: str | None, env: dict | None = None) -> dict:
     job = env.get("CONCIERGE_THREAD_JOB")
     if not job:
         raise typer.BadParameter("not a concierge job: give --thread <id>, or set CONCIERGE_THREAD_JOB")
-    return {"thread_id": None, "job": job, "title": thread, "pane": env.get("CONCIERGE_THREAD_PANE")}
+    # A session started from the Claude app is a child of `claude remote-control`: it inherits the
+    # server's TMUX_PANE but has no input box of its own, so typing into that pane reaches nobody
+    # (hair-fibres, 2026-11-19). No pane makes the app say so instead of "not delivered".
+    pane = None if env.get("CLAUDE_CODE_ENVIRONMENT_KIND") == "bridge" else env.get("CONCIERGE_THREAD_PANE")
+    return {"thread_id": None, "job": job, "title": thread, "pane": pane}
 
 
 def _open_thread(db, thread: str | None):
