@@ -689,6 +689,35 @@ def ask_cmd(
     _nudge_summary(th)
 
 
+@app.command("draft")
+def draft_cmd(
+    draft_id: str = typer.Argument(..., help="The Gmail draft id (gdraft list shows it)"),
+    thread: str = typer.Option(None),
+    urgency: str = typer.Option("needs"),
+    replaces: list[int] = typer.Option(None, "--replaces", help="An earlier email card this draft overtakes"),
+):
+    """Hand him a Gmail draft to send: a card in the app where he can change From, To, Subject and
+    the text, then Send. His send arrives back to you as a message. Make the draft first (gmail-drafts)."""
+    from concierge import emaildraft, threads
+
+    try:
+        d = emaildraft.load(draft_id)
+    except RuntimeError as exc:
+        raise typer.BadParameter(f"can't read draft {draft_id}: {exc}") from None
+    with threads.connect() as db:
+        th = _open_thread(db, thread)
+        mid = threads.post(db, th, f"Email to {d['to']}: {d['subject']}", urgency=urgency, kind="draft",
+                           options=["Send"], ref=draft_id)
+        # Re-running it after editing the draft swaps the card, so he never sends from a stale copy.
+        stale = [r["id"] for r in threads.open_decisions(db, th["id"]) if r["kind"] == "draft" and r["ref"] == draft_id]
+        for old in [*stale, *(replaces or [])]:
+            if old != mid:
+                threads.withdraw(db, old, f"replaced by the edited email (decision {mid})")
+    typer.echo(f"draft card in thread {th['id']} (decision {mid}); you'll hear when he sends it. "
+               "To change it, edit the Gmail draft, then run this again: the card is replaced.")
+    _nudge_summary(th)
+
+
 @app.command("decisions")
 def decisions_cmd(thread: str = typer.Option(None)):
     """Your open decisions, oldest first: check none is stale before you ask another."""

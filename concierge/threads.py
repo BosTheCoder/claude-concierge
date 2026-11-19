@@ -81,7 +81,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
-    for table, col in (("threads", "summary"), ("messages", "context"), ("messages", "why"), ("messages", "revised")):
+    for table, col in (("threads", "summary"), ("messages", "context"), ("messages", "why"), ("messages", "revised"),
+                       ("messages", "ref")):
         if col not in {c["name"] for c in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
     if not db.execute("SELECT 1 FROM modes LIMIT 1").fetchone() and not _kv(db, "modes_seeded"):
@@ -229,17 +230,17 @@ def find_or_create(db, *, job: str | None, title: str | None, pane: str | None =
 
 def post(db, thread: sqlite3.Row, text: str, *, author: str = "job", urgency: str = "fyi",
          options: list[str] | None = None, recommend: str | None = None, kind: str = "msg",
-         context: str | None = None, why: str | None = None, sender=None) -> int:
+         context: str | None = None, why: str | None = None, ref: str | None = None, sender=None) -> int:
     if urgency not in LEVELS:
         raise ValueError(f"urgency must be one of {', '.join(LEVELS)}")
     if options and recommend and recommend not in options:
         raise ValueError("--recommend must be one of the options")
     t = _iso(now())
     cur = db.execute(
-        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, context, why, created) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, context, why, ref, created) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (thread["id"], author, text, urgency, kind, json.dumps(options) if options else None, recommend,
-         context, why, t))
+         context, why, ref, t))
     db.execute("UPDATE threads SET updated=?, status=CASE WHEN status='closed' AND ?='job' THEN 'open' ELSE status END "
                "WHERE id=?", (t, author, thread["id"]))
     if author != "me":
@@ -331,6 +332,8 @@ def answer(db, msg_id: int, choice: str, *, note: str = "", submitter=None, grac
     """His tap on a decision. It waits `grace` seconds before going to the job, so Undo in that
     window takes it back without the job ever seeing it. Returns why it didn't reach the job, or None."""
     msg, thread = _decision(db, msg_id)
+    if msg["kind"] == "draft":
+        raise ValueError("an email is sent from its card")
     if choice not in json.loads(msg["options"]):
         raise ValueError("not one of the options")
     db.execute("UPDATE messages SET answer=?, answered_by='me', answered_at=?, state='held', error=NULL WHERE id=?",
@@ -354,6 +357,19 @@ def _send_answer(db, msg_id: int, *, note: str = "", submitter=None) -> str | No
     body = f'Decision on "{msg["text"]}": Kelvin chose "{msg["answer"]}".' + (f" {note}" if note else "")
     problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
     db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else "picked", problem, msg_id))
+    return problem
+
+
+def email_sent(db, msg_id: int, *, sender: str, to: str, edited: bool, submitter=None) -> str | None:
+    """He sent a job's email draft from its card. Recorded, then the job is told."""
+    msg, thread = _decision(db, msg_id)
+    db.execute("UPDATE messages SET answer=?, answered_by='me', answered_at=?, state='picked' WHERE id=?",
+               (f"Sent from {sender}", _iso(now()), msg_id))
+    body = (f'Kelvin sent the email "{msg["text"]}" (Gmail draft {msg["ref"]}) from {sender} to {to}'
+            f'{", after editing it" if edited else ", as you drafted it"}. It is sent: log it, don\'t send it again.')
+    problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+    if problem:
+        db.execute("UPDATE messages SET state='failed', error=? WHERE id=?", (problem, msg_id))
     return problem
 
 
@@ -414,6 +430,8 @@ def decided(db, thread: sqlite3.Row, question: str, choice: str, *, rule: str, k
 def undo(db, msg_id: int, *, submitter=None) -> str | None:
     """Take back a decision: his own answer (the question opens again) or one Claude took for him."""
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    if msg and msg["kind"] == "draft":
+        raise ValueError("a sent email can't be taken back")
     if msg and msg["answered_by"] == "me":
         reopen_q = "UPDATE messages SET answer=NULL, answered_by=NULL, answered_at=NULL, state=NULL, error=NULL WHERE id=?"
         if msg["kind"] == "close?":  # the app's own question: nothing went to a job

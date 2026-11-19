@@ -12,11 +12,11 @@ import re
 import threading
 from pathlib import Path
 
-from concierge import config, inbox_waiting, registry, spawn, threads
+from concierge import config, emaildraft, inbox_waiting, registry, spawn, threads
 
 APP_HTML = Path(__file__).with_name("app.html")
 ROUTE = re.compile(r"^/api/threads/(\d+)(?:/(\w+))?$")
-LIMITS = {"text": 8000, "spec": 4000, "rules": 8000, "note": 2000}
+LIMITS = {"text": 8000, "spec": 4000, "rules": 8000, "note": 2000, "to": 2000, "cc": 2000, "subject": 1000}
 
 
 def manifest(prefix: str = "") -> str:
@@ -73,6 +73,15 @@ def get(path: str, query: dict) -> tuple[int, dict]:
             q = (query.get("q") or [""])[0][:200]
             return 200, {"threads": threads.home(db, q=q, closed=bool(query.get("closed"))), "brief": brief(),
                          "mode": (m := threads.active_mode(db)) and m["name"]}
+        if (m := ROUTE.match(path)) and m.group(2) == "draft":
+            msg = db.execute("SELECT ref FROM messages WHERE id=? AND thread=? AND kind='draft'",
+                             (int((query.get("msg") or ["0"])[0]), int(m.group(1)))).fetchone()
+            if not msg:
+                return 404, {"error": "no such email"}
+            try:
+                return 200, emaildraft.load(msg["ref"])
+            except RuntimeError as exc:
+                return 502, {"error": f"Gmail: {exc}"}
         if m := ROUTE.match(path):
             try:
                 return 200, threads.detail(db, int(m.group(1)))
@@ -182,6 +191,20 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
             threads._decision(db, msg)  # refuse now (400) rather than on the worker
             _bg(threads.answer, msg, choice, note=_text(body, "note", required=False),
                 grace=threads.UNDO_SECONDS)
+        elif action == "sendemail":
+            msg, _ = threads._decision(db, int(body["msg"]))
+            if msg["kind"] != "draft" or msg["thread"] != tid:
+                return 400, {"ok": False, "error": "not an email in this thread"}
+            html = body.get("html")
+            if html is not None and (not isinstance(html, str) or len(html) > 200_000 or not html.strip()):
+                return 400, {"ok": False, "error": "the email text is empty or too long"}
+            sender, to = _text(body, "from"), _text(body, "to", required=False)
+            try:
+                emaildraft.send(msg["ref"], sender=sender, to=to, cc=_text(body, "cc", required=False),
+                                subject=_text(body, "subject", required=False), html=html)
+            except RuntimeError as exc:
+                return 502, {"ok": False, "error": f"Gmail: {exc}"}
+            _bg(threads.email_sent, msg["id"], sender=sender, to=to, edited=html is not None)
         elif action == "undo":
             _bg(threads.undo, int(body["msg"]))
         elif action == "close":

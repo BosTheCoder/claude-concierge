@@ -50,6 +50,12 @@
   .summary .who, .ask .who { font-size:12px; color:var(--dim); margin-bottom:4px; }
   .ask { border:1px solid var(--amber); border-radius:10px; padding:10px 12px; margin-bottom:10px; white-space:pre-wrap; overflow-wrap:anywhere; }
   .askrow { display:flex; gap:6px; margin-top:8px; } .askrow button { flex:1; }
+  .ask.mail { white-space:normal; }
+  .ask.mail label { display:block; font-size:12px; color:var(--dim); margin:8px 0 2px; }
+  .ask.mail input, .ask.mail select { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .ask.mail .body { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:10px; min-height:5em; outline:none; }
+  .ask.mail .body:focus { border-color:var(--blue); } .ask.mail .body p { margin:0 0 .7em; }
+  .ask.mail .muted { margin-top:6px; } .askrow a.btn { flex:1; text-align:center; text-decoration:none; }
   .about { font-size:13px; color:var(--dim); padding:0 4px 6px; display:flex; gap:8px; align-items:center; }
   .about span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .composer { flex-wrap:wrap; } .composer .about { flex-basis:100%; }
@@ -213,7 +219,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
@@ -237,6 +243,10 @@ async function thread(id, quiet) {
   $("#deleg").onclick = () => delegForm(t);
   $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
+  $("#main").querySelectorAll("[data-mail]").forEach(card => { const e = mails[card.dataset.mail].e;
+    card.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => e[el.dataset.f] = el.dataset.f === "html" ? el.innerHTML : el.value); });
+  $("#main").querySelectorAll("[data-mailsend]").forEach(b => b.onclick = () => sendMail(+b.dataset.mailsend, b));
+  $("#main").querySelectorAll("[data-mailretry]").forEach(b => b.onclick = () => { delete mails[b.dataset.mailretry]; lastSig = ""; thread(current.id); });
   $("#main").querySelectorAll("[data-explain]").forEach(b => b.onclick = () =>
     send("Explain this one: what it relates to, and what each option leads to and costs.", +b.dataset.explain));
   $("#main").querySelectorAll("[data-about]").forEach(b => b.onclick = () => {
@@ -255,11 +265,53 @@ function fold(m, key, label) {
 function opts(m) {
   if (!m.options) return "";
   if (m.answer !== null && m.answer !== undefined)
-    return m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
+    return m.kind === "draft" ? `<div class="answered${m.answered_by === "withdrawn" ? " withdrawn" : ""}">${esc(m.answer)}</div>`
+      : m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
       : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
       : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "offline" ? " · waiting for signal" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-undo="${m.id}">Undo</button></div>`;
   return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
+}
+// An email a job drafted: he can change From, To, Cc, Subject and the text, then Send (two taps).
+// Loaded from Gmail once per visit; his edits live here, so a redraw while he types keeps them.
+const mails = {}, mailLoading = new Set();
+function mailCard(m) {
+  const s = mails[m.id], head = `<div class="who"><span class="dot ${m.urgency}"></span> Email to send · ${age(m.created)}</div>`;
+  const about = `<button class="btn ghost" data-about="${m.id}">Ask Claude to change it</button>`;
+  if (!s) { loadMail(m.id); return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">Loading from Gmail…</p></div>`; }
+  if (s.err) return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">⚠ ${esc(s.err)}</p>
+    <div class="askrow"><button class="btn ghost" data-mailretry="${m.id}">Try again</button>${about}</div></div>`;
+  const {d, e} = s;
+  return `<div class="ask mail" data-mail="${m.id}">${head}
+    <label>From</label><select data-f="from">${d.aliases.map(a => `<option value="${esc(a.email)}" ${a.email === e.from ? "selected" : ""}>${esc(a.email)}${a.name ? ` · ${esc(a.name)}` : ""}</option>`).join("")}</select>
+    <label>To</label><input data-f="to" value="${esc(e.to)}" autocomplete="off">
+    <label>Cc</label><input data-f="cc" value="${esc(e.cc)}" autocomplete="off">
+    <label>Subject</label><input data-f="subject" value="${esc(e.subject)}" autocomplete="off">
+    <div class="body" contenteditable="true" data-f="html">${e.html}</div>
+    ${d.reply ? `<div class="muted">The earlier emails stay quoted underneath, as in Gmail.</div>` : ""}
+    ${d.attachments.length ? `<div class="muted">📎 ${d.attachments.map(esc).join(", ")}</div>` : ""}
+    <div class="askrow"><button class="btn" data-mailsend="${m.id}">Send email</button><a class="btn ghost" href="${esc(d.gmail)}" target="_blank" rel="noopener">Open in Gmail</a></div>
+    <div class="askrow">${about}</div></div>`;
+}
+async function loadMail(id) {
+  if (mailLoading.has(id)) return; mailLoading.add(id);
+  try { const d = await api(`threads/${current.id}/draft?msg=${id}`);
+    mails[id] = {d, e: {from: d.from, to: d.to, cc: d.cc, subject: d.subject, html: d.html}}; }
+  catch (err) { mails[id] = {err: err.message}; }
+  mailLoading.delete(id); lastSig = ""; thread(current.id, true);
+}
+async function sendMail(id, b) {
+  const s = mails[id];
+  if (!s.armed) { s.armed = true; b.textContent = "Tap again to send";
+    setTimeout(() => { s.armed = false; if (b.isConnected && !b.disabled) b.textContent = "Send email"; }, 4000); return; }
+  s.armed = false; b.disabled = true; b.textContent = "Sending…";
+  const {d, e} = s;
+  try { const r = await api(`threads/${current.id}/sendemail`, {msg: id, from: e.from, to: e.to, cc: e.cc, subject: e.subject,
+      ...(e.html !== d.html && {html: e.html})}, `Send email “${e.subject}”`);
+    toast(r.queued ? "No signal: the email sends when you're back online" : `Sent from ${e.from}`);
+    if (!r.queued) delete mails[id];
+    lastSig = ""; thread(current.id); }
+  catch (err) { toast(err.message); b.disabled = false; b.textContent = "Send email"; }
 }
 function msg(m) {
   const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
