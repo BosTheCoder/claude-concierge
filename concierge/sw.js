@@ -38,7 +38,7 @@ async function read(req, e) {
 
 async function sendOrQueue(req) {
   const body = await req.clone().text();
-  try { return await fetch(req); } catch {}  // no network: keep it for later
+  try { const r = await fetch(req); if (r.status < 502 || r.status > 504) return r; } catch {}  // no network, or the server restarting: keep it for later
   const label = decodeURIComponent(req.headers.get("X-Outbox-Label") || "") || "An edit";
   const box = await caches.open(OUTBOX);
   await box.put(`/outbox/${Date.now()}-${Math.random().toString(36).slice(2)}`,

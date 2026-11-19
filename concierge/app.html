@@ -150,7 +150,7 @@ let timer = null, filter = {need:"all", urg:"all"}, homeQ = "", showClosed = fal
 async function api(path, body, label) {  // label: what sw.js's outbox calls it if it has to wait for signal
   const r = await fetch("api/" + path, body === undefined ? {} :
     {method:"POST", headers:{"Content-Type":"application/json", ...(label && {"X-Outbox-Label": encodeURIComponent(label)})}, body:JSON.stringify(body)});
-  const j = await r.json().catch(() => ({error:"bad reply"}));
+  const j = await r.json().catch(() => ({error: r.ok ? "bad reply" : `The concierge server isn't answering (${r.status}). Try again in a moment.`}));
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
@@ -223,7 +223,8 @@ async function thread(id, quiet) {
   const latest = lastJob && !lastJob.options && !mine.includes(lastJob) ? lastJob : null;
   const shown = new Set([...open, ...recent, ...mine, ...(latest ? [latest] : [])]);
   const past = ms.filter(m => !shown.has(m));
-  const top = (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>` : "")
+  const top = (t.job ? `<p class="muted">Claude chat: ${t.chat_url ? `<a href="${esc(t.chat_url)}" target="_blank" rel="noopener">${esc(t.job)} ↗</a>` : esc(t.job)}</p>` : "")
+    + (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>` : "")
     + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}</div>` : "");
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
@@ -357,7 +358,7 @@ async function send(canned, about) {
   $("#send").disabled = true;
   try { const r = await api(`threads/${current.id}/say`, {text, ...(re && {about: re})}, `Message in “${current.title}”: ${text.slice(0, 80)}`);
     if (!canned) { $("#say").value = ""; $("#say").style.height = "auto"; aboutId = null; aboutBar(); }
-    toast(r.queued ? "No signal: sends when you're back online" : canned ? "Asked Claude to explain" : "Sent");
+    toast(r.queued ? "Not sent yet: it sends when the connection is back" : canned ? "Asked Claude to explain" : "Sent");
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
   $("#send").disabled = false;
