@@ -45,6 +45,13 @@ def test_a_decision_is_answered_once_and_only_by_a_tap(db, clock):
         threads.answer(db, mid, "Drury's", submitter=lambda *_: None)
 
 
+def test_tapping_an_answer_counts_as_his_reply(db, clock):
+    th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
+    mid = threads.post(db, th, "Ask Benson?", urgency="needs", options=["Ask", "Skip"], sender=lambda *_: None)
+    threads.answer(db, mid, "Ask", submitter=lambda *_: None)
+    assert threads.detail(db, th["id"])["needs"] == "nothing"
+
+
 def test_claude_decides_only_inside_a_live_delegation(db, clock):
     th = threads.find_or_create(db, job="A1", title="Plumber", pane="p")
     with pytest.raises(PermissionError):

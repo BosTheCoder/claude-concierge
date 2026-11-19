@@ -486,9 +486,10 @@ def _needs(db, thread_id: int) -> tuple[str, str]:
                          "AND kind!='close?' ORDER BY id DESC LIMIT 1", (thread_id,)).fetchone()
     if pending:
         return "decision", pending["urgency"]
-    last = db.execute("SELECT author, urgency FROM messages WHERE thread=? ORDER BY id DESC LIMIT 1",
+    last = db.execute("SELECT author, urgency, answer FROM messages WHERE thread=? ORDER BY id DESC LIMIT 1",
                       (thread_id,)).fetchone()
-    if last and last["author"] != "me" and last["urgency"] != "fyi":
+    # A tapped answer is his reply too: it lands on the job's message, not as a message of his.
+    if last and last["author"] != "me" and last["answer"] is None and last["urgency"] != "fyi":
         return "reply", last["urgency"]
     return "nothing", "fyi"
 
