@@ -16,6 +16,18 @@ QUOTE = ('<div class="gmail_quote gmail_quote_container"><div class="gmail_attr"
          '</blockquote></div>')
 
 
+def mail(frm: str, body: str) -> str:
+    m = email.message.EmailMessage()
+    m["From"], m["Date"] = frm, "Tue, 17 Nov 2026 11:07:19 +0000"
+    m.set_content(body)
+    return base64.urlsafe_b64encode(m.as_bytes()).decode()
+
+
+THREAD = {"a": mail("Bosire <nyakundi@hotmail.co.uk>", "Is there a parking space?"),
+          "b": mail("Royal Wharf <rw@x.com>", "Dear Bosire, prices below.\n\n________________\nFrom: Bosire\nSent: 17 Nov\n"
+                                              "Is there a parking space?")}
+
+
 def reply_draft() -> bytes:
     m = email.message.EmailMessage()
     m["From"], m["To"], m["Cc"] = "Bosire Nyakundi <nyakundi@hotmail.co.uk>", "rw@x.com", "someone@x.com"
@@ -37,6 +49,11 @@ def gmail(monkeypatch):
         if path.startswith("/drafts/") and method == "GET":
             return {"id": "r-1", "message": {"id": "m1", "threadId": "t1",
                                              "raw": base64.urlsafe_b64encode(state["raw"]).decode()}}
+        if path == "/threads/t1":
+            return {"messages": [{"id": "a", "labelIds": ["SENT"]}, {"id": "b", "labelIds": ["INBOX"]},
+                                 {"id": "m1", "labelIds": ["DRAFT"]}]}
+        if path.startswith("/messages/"):
+            return {"raw": THREAD[path.rsplit("/", 1)[1]]}
         if method == "PUT":
             assert payload["message"]["threadId"] == "t1"
             state["raw"] = base64.urlsafe_b64decode(payload["message"]["raw"])
@@ -63,6 +80,9 @@ def test_he_edits_the_reply_changes_from_and_sends_it(gmail, tmp_path, monkeypat
     card = emaildraft.load("r-1")
     assert QUOTE not in card["html"] and "Thanks." in card["html"]  # only his new text is editable
     assert card["from"] == "nyakundi@hotmail.co.uk"
+    # What he's replying to, oldest first, without the draft, and without each reply's repeated quote.
+    assert [m["email"] for m in card["thread"]] == ["nyakundi@hotmail.co.uk", "rw@x.com"]
+    assert "prices below" in card["thread"][1]["text"] and "parking space" not in card["thread"][1]["text"]
 
     code, out = app_api.post(f"/api/threads/{th['id']}/sendemail", {
         "msg": mid, "from": "nyakundipropertymanagement@gmail.com", "to": "rw@x.com", "cc": "",

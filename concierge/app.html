@@ -55,7 +55,16 @@
   .ask.mail input, .ask.mail select { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
   .ask.mail .body { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:10px; min-height:5em; outline:none; }
   .ask.mail .body:focus { border-color:var(--blue); } .ask.mail .body p { margin:0 0 .7em; }
-  .ask.mail .muted { margin-top:6px; } .askrow a.btn { flex:1; text-align:center; text-decoration:none; }
+  .ask.mail .muted { margin-top:6px; }
+  .convo { margin:6px 0 4px; display:flex; flex-direction:column; gap:6px; }
+  .convo .lbl, .convo summary { font-size:12px; color:var(--dim); }
+  .convo summary { cursor:pointer; padding:2px 0 4px; } .convo details[open] { display:flex; flex-direction:column; gap:6px; }
+  .em { max-width:92%; background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:7px 10px; font-size:15px; }
+  .em.mine { margin-left:auto; background:var(--me); border-color:#2b4c78; }
+  .em .emh { font-size:12px; color:var(--dim); margin-bottom:2px; }
+  .em .emt { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .em .emt.clamp { max-height:13em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 70%, transparent); mask-image:linear-gradient(#000 70%, transparent); }
+  .em .more { background:none; border:0; color:var(--blue); padding:4px 0 0; font-size:13px; cursor:pointer; } .askrow a.btn { flex:1; text-align:center; text-decoration:none; }
   .about { font-size:13px; color:var(--dim); padding:0 4px 6px; display:flex; gap:8px; align-items:center; }
   .about span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .composer { flex-wrap:wrap; } .composer .about { flex-basis:100%; }
@@ -245,6 +254,10 @@ async function thread(id, quiet) {
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
   $("#main").querySelectorAll("[data-mail]").forEach(card => { const e = mails[card.dataset.mail].e;
     card.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => e[el.dataset.f] = el.dataset.f === "html" ? el.innerHTML : el.value); });
+  $("#main").querySelectorAll("[data-mail]").forEach(card => { const s = mails[card.dataset.mail];
+    card.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => { const k = b.dataset.ui;
+      s.ui.has(k) ? s.ui.delete(k) : s.ui.add(k); lastSig = ""; thread(current.id, true); });
+    card.querySelectorAll("details[data-uid]").forEach(dt => dt.ontoggle = () => dt.open ? s.ui.add(dt.dataset.uid) : s.ui.delete(dt.dataset.uid)); });
   $("#main").querySelectorAll("[data-mailsend]").forEach(b => b.onclick = () => sendMail(+b.dataset.mailsend, b));
   $("#main").querySelectorAll("[data-mailretry]").forEach(b => b.onclick = () => { delete mails[b.dataset.mailretry]; lastSig = ""; thread(current.id); });
   $("#main").querySelectorAll("[data-explain]").forEach(b => b.onclick = () =>
@@ -281,8 +294,16 @@ function mailCard(m) {
   if (!s) { loadMail(m.id); return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">Loading from Gmail…</p></div>`; }
   if (s.err) return `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">⚠ ${esc(s.err)}</p>
     <div class="askrow"><button class="btn ghost" data-mailretry="${m.id}">Try again</button>${about}</div></div>`;
-  const {d, e} = s;
-  return `<div class="ask mail" data-mail="${m.id}">${head}
+  const {d, e} = s, th = d.thread || [], mine = new Set(d.aliases.map(a => a.email.toLowerCase()));
+  const when = v => { const t = new Date(v); return isNaN(t) ? esc(v) : t.toLocaleString([], {weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}); };
+  const em = (x, i) => { const k = `e${i}`, long = x.text.length > 600 || x.text.split("\n").length > 12, open = s.ui.has(k);
+    return `<div class="em ${mine.has(x.email.toLowerCase()) ? "mine" : ""}"><div class="emh"><b>${esc(x.from)}</b> · ${when(x.date)}</div>
+      <div class="emt ${long && !open ? "clamp" : ""}">${linkify(x.text)}</div>${long ? `<button class="more" data-ui="${k}">${open ? "Show less" : "Show all"}</button>` : ""}</div>`; };
+  const older = th.slice(0, -1);
+  const convo = th.length ? `<div class="convo"><div class="lbl">Replying to</div>
+    ${older.length ? `<details data-uid="older" ${s.ui.has("older") ? "open" : ""}><summary>${older.length} earlier email${older.length === 1 ? "" : "s"}</summary>${older.map(em).join("")}</details>` : ""}
+    ${em(th[th.length - 1], th.length - 1)}</div>` : "";
+  return `<div class="ask mail" data-mail="${m.id}">${head}${convo}
     <label>From</label><select data-f="from">${d.aliases.map(a => `<option value="${esc(a.email)}" ${a.email === e.from ? "selected" : ""}>${esc(a.email)}${a.name ? ` · ${esc(a.name)}` : ""}</option>`).join("")}</select>
     <label>To</label><input data-f="to" value="${esc(e.to)}" autocomplete="off">
     <label>Cc</label><input data-f="cc" value="${esc(e.cc)}" autocomplete="off">
@@ -296,7 +317,7 @@ function mailCard(m) {
 async function loadMail(id) {
   if (mailLoading.has(id)) return; mailLoading.add(id);
   try { const d = await api(`threads/${current.id}/draft?msg=${id}`);
-    mails[id] = {d, e: {from: d.from, to: d.to, cc: d.cc, subject: d.subject, html: d.html}}; }
+    mails[id] = {d, ui: new Set(), e: {from: d.from, to: d.to, cc: d.cc, subject: d.subject, html: d.html}}; }
   catch (err) { mails[id] = {err: err.message}; }
   mailLoading.delete(id); lastSig = ""; thread(current.id, true);
 }

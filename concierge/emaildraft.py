@@ -34,9 +34,9 @@ def _gd():
     return mod
 
 
-def _call(fn, *args):
+def _call(fn, *args, **kw):
     try:
-        return fn(*args)
+        return fn(*args, **kw)
     except SystemExit as exc:  # gdraft reports Gmail errors by exiting
         raise RuntimeError(str(exc)) from None
 
@@ -83,6 +83,33 @@ def _parts(gd, raw: bytes):
     return msg, html, (p.get_content() if p else to_text(html))
 
 
+# Where a reply's quoted history starts: Gmail's "On ... wrote:", Outlook's rule then From:/Sent:.
+QUOTED = re.compile(r"\n\s*(?:On [^\n]*(?:\n[^\n]*)?wrote:|_{10,}\s*\nFrom:|-{3,} ?Original Message|From: [^\n]+\n(?:Sent|Date): )", re.S)
+
+
+def thread(gd, token, thread_id: str | None, limit: int = 8) -> list[dict]:
+    """The emails the draft replies to, oldest first, drafts left out. Each one's own quoted
+    history is cut (it repeats the one before), except the oldest's: that is often his
+    original question, which isn't in the thread on its own."""
+    if not thread_id:
+        return []
+    ids = [m["id"] for m in _call(gd.api, token, f"/threads/{thread_id}", format="minimal").get("messages", [])
+           if "DRAFT" not in m.get("labelIds", [])][-limit:]
+    out = []
+    for i, mid in enumerate(ids):
+        r = _call(gd.api, token, f"/messages/{mid}", format="raw")
+        msg = email.message_from_bytes(base64.urlsafe_b64decode(r["raw"]), policy=email.policy.default)
+        b = msg.get_body(preferencelist=("plain", "html"))
+        text = (b.get_content() if b.get_content_type() == "text/plain" else to_text(b.get_content())) if b else ""
+        text = re.sub(r"\[cid:[^\]]*\]\n?|[\u200b\u200c\u200d\ufeff]", "", text).replace("\r", "")
+        if i and (q := QUOTED.search(text)):
+            text = text[:q.start()]
+        name, addr = parseaddr(str(msg.get("From") or ""))
+        out.append({"from": name or addr, "email": addr, "date": str(msg.get("Date") or ""),
+                    "text": re.sub(r"\n{3,}", "\n\n", text).strip()[:6000]})
+    return out
+
+
 def load(draft_id: str, *, user: str | None = None) -> dict:
     gd = _gd()
     token = _call(gd.access_token, user or gd.DEFAULT_EMAIL)
@@ -96,7 +123,15 @@ def load(draft_id: str, *, user: str | None = None) -> dict:
             "to": str(msg.get("To") or ""), "cc": str(msg.get("Cc") or ""), "subject": str(msg.get("Subject") or ""),
             "html": _clean(head), "aliases": aliases, "reply": bool(msg.get("In-Reply-To")),
             "attachments": [p.get_filename() or "inline image" for p in gd.parts_to_keep(msg)],
+            "thread": _thread_or_none(gd, token, d["message"].get("threadId")),
             "gmail": f"https://mail.google.com/mail/u/0/#drafts?compose={d['message']['id']}"}
+
+
+def _thread_or_none(gd, token, thread_id):
+    try:
+        return thread(gd, token, thread_id)
+    except RuntimeError:  # the card still works without its history
+        return []
 
 
 def send(draft_id: str, *, sender: str, to: str, cc: str, subject: str, html: str | None,
