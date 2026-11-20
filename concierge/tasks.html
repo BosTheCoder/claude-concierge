@@ -32,7 +32,14 @@
   .head { display:flex; align-items:stretch }
   .fold { all:unset; flex:none; padding:0 14px; color:var(--mute); font-size:14px; cursor:pointer; display:flex; align-items:center; gap:4px }
   .fold:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
-  .head > button[data-toggle] { all:unset; box-sizing:border-box; display:flex; gap:10px; flex:1; min-width:0; padding:12px 14px; cursor:pointer; align-items:flex-start }
+  .head > button[data-toggle] { all:unset; box-sizing:border-box; display:flex; gap:10px; flex:1; min-width:0; padding:12px 14px 12px 0; cursor:pointer; align-items:flex-start }
+  .head { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none }  /* long-press opens the menu, not a text selection */
+  .chk { all:unset; flex:none; padding:12px 10px 12px 14px; display:flex; align-items:flex-start }
+  button.chk { cursor:pointer } button.chk:hover .p { background:var(--chip) }
+  button.chk:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
+  #menu { position:fixed; z-index:20; display:flex; flex-direction:column; gap:4px; padding:6px; background:var(--card);
+    border:1px solid var(--line); border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.25) }
+  #menu .chip { text-align:left }
   .head > button[data-toggle]:focus-visible { outline:2px solid var(--blue); outline-offset:-2px }
   .t.sub { margin-left:20px }
   .t { border-left:4px solid var(--lc, var(--line)) }  /* the task's list colour, as in TickTick */
@@ -252,8 +259,9 @@ function render() {
     const fold = kids ? `<button class="fold" data-fold="${esc(t.id)}" aria-expanded="${!folded}"
         aria-label="${folded ? "Show" : "Hide"} ${kids} subtask${kids === 1 ? "" : "s"}">${kids} ${folded ? "▸" : "▾"}</button>` : "";
     return `<div class="t${openId === t.id ? " open" : ""}${t.sub ? " sub" + (t.sub > 1 ? " sub" + t.sub : "") : ""}"${listColor(t)}>
-      <div class="head"><button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="p p${t.priority || 0}"></span>
-        <span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>${fold}</div>
+      <div class="head">${t.closed || !t.etag ? `<span class="chk"><span class="p p${t.priority || 0}"></span></span>`
+        : `<button class="chk" data-check="${esc(t.id)}" aria-label="Complete: ${esc(t.title)}"${busy ? " disabled" : ""}><span class="p p${t.priority || 0}"></span></button>`}
+        <button aria-expanded="${openId === t.id}" data-toggle="${esc(t.id)}"><span class="ti">${esc(t.title)}<span class="meta">${meta}</span></span>${c ? '<span class="dot">✦</span>' : ""}</button>${fold}</div>
       <div class="body">${openId === t.id ? notes(t) : ""}
         ${openId === t.id ? controls(t) : ""}
         <div class="row">${action(t)}</div><div class="row">${tt}</div></div></div>`;
@@ -310,7 +318,25 @@ $("#q").oninput = () => {
     render();
   }, 150);
 };
+// Like TickTick: the box completes a task; right-click (long-press on the phone) offers Completed / Won't do.
+document.addEventListener("contextmenu", e => {
+  const h = e.target.closest("[data-check]") || e.target.closest(".head")?.querySelector("[data-check]");
+  if (!h) return;
+  e.preventDefault(); $("#menu")?.remove();
+  document.body.insertAdjacentHTML("beforeend", `<div id="menu" role="menu" data-task="${esc(h.dataset.check)}">
+    <button class="chip" role="menuitem" data-status="2">✓ Completed</button><button class="chip" role="menuitem" data-status="-1">✕ Won't do</button></div>`);
+  const m = $("#menu"), r = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(e.clientX, innerWidth - r.width - 8)) + "px";
+  m.style.top = Math.max(8, Math.min(e.clientY, innerHeight - r.height - 8)) + "px";
+  m.querySelector("button").focus();
+});
+const closeMenu = () => $("#menu")?.remove();
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeMenu(); });
+addEventListener("scroll", closeMenu, true);
 document.addEventListener("click", e => {
+  if (!e.target.closest("#menu")) closeMenu();
+  const ck = e.target.closest("[data-check]");
+  if (ck) { change(ck.dataset.check, {status: 2}, "Done"); return; }
   const v = e.target.closest("[data-view]");
   if (v) { view = v.dataset.view; store.set("tc-view", view); $("#q").value = ""; openId = null; render(); return; }
   const fo = e.target.closest("[data-fold]");
@@ -329,7 +355,7 @@ document.addEventListener("click", e => {
     else if (b?.dataset.pri !== undefined) change(id, {priority: +b.dataset.pri}, "Priority");
     else if (b?.dataset.status === "2") change(id, {status: 2}, "Done");
     else if (b?.dataset.status === "-1") change(id, {status: -1}, "Won't do");
-    if (b) return;
+    if (b) { closeMenu(); return; }
   }
   const st = e.target.closest("[data-start]");
   if (st) { start(st.dataset.start); return; }
