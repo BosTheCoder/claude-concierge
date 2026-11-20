@@ -345,3 +345,18 @@ def test_a_phone_started_session_is_named_by_its_cloud_id():
     argv = ("claude.exe", "--print", "--session-id", "cse_01EETyTC7mDqksPTSshL8HV9")
     assert sessions.cloud_session_id(argv) == "cse_01EETyTC7mDqksPTSshL8HV9"
     assert sessions.cloud_session_id(("claude", "--permission-mode", "auto")) is None
+
+
+def test_app_title_names_a_phone_session_and_retries_a_miss_later(monkeypatch):
+    calls = []
+    answers = iter([{"title": ""}, {"title": "Basketball skills group setup"}])
+    fetch = lambda sid: calls.append(sid) or next(answers)  # noqa: E731
+    clock = [1000.0]
+    monkeypatch.setattr(sessions.time, "time", lambda: clock[0])
+
+    assert sessions.app_title("cse_X", fetch=fetch) == ""  # not titled yet
+    assert sessions.app_title("cse_X", fetch=fetch) == ""  # no second call inside 5 min
+    clock[0] += 301
+    assert sessions.app_title("cse_X", fetch=fetch) == "Basketball skills group setup"
+    assert sessions.app_title("cse_X", fetch=fetch) == "Basketball skills group setup"
+    assert calls == ["cse_X", "cse_X"]

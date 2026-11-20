@@ -869,6 +869,37 @@ def _pane_for(
     return None
 
 
+_APP_TITLES: dict[str, str] = {}
+_APP_MISSES: dict[str, float] = {}
+
+
+def app_title(session_id: str, *, fetch=None) -> str:
+    """The chat's title in the Claude app, for a session started from the phone.
+
+    Its process carries only the `cse_…` id. Cached once found; a miss (a new
+    chat not titled yet, or the API down) is retried after 5 minutes so the
+    5-second poll never turns into 5-second API calls.
+    """
+    # ponytail: a rename in the app isn't picked up until the dashboard restarts
+    if session_id in _APP_TITLES:
+        return _APP_TITLES[session_id]
+    if time.time() - _APP_MISSES.get(session_id, 0) < 300:
+        return ""
+    if fetch is None:
+        from concierge.reaper import _api
+
+        fetch = lambda sid: _api("GET", f"/v1/sessions/{sid}")  # noqa: E731
+    try:
+        title = (fetch(session_id).get("title") or "").strip()
+    except Exception:  # noqa: BLE001 - no title just means the id stays
+        title = ""
+    if title:
+        _APP_TITLES[session_id] = title
+    else:
+        _APP_MISSES[session_id] = time.time()
+    return title
+
+
 def _title_for(
     proc: Proc,
     job_id: str | None,
@@ -885,7 +916,7 @@ def _title_for(
         return "Remote Control server (this machine in the Claude app)"
     cloud = cloud_session_id(proc.argv)
     if cloud:
-        return f"started from the Claude app · {cloud}"
+        return app_title(cloud) or f"started from the Claude app · {cloud}"
     if transcript is not None:
         title = transcript_title(transcript)
         if title:
