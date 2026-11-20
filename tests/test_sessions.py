@@ -41,8 +41,19 @@ def test_a_job_the_registry_calls_running_is_running():
 
 def test_a_registered_running_job_wins_over_a_quiet_cpu():
     # The dangerous combination: the row says running, the process happens to
-    # be between API calls and reading idle. The registry has to win.
-    assert state(job_status="running", cpu_rate=0.1, pane="idle") == "running"
+    # be between API calls and reading idle. Without a pane showing the turn
+    # ended, the registry has to win.
+    assert state(job_status="running", cpu_rate=0.1, pane=None) == "running"
+    assert state(job_status="running", cpu_rate=0.1, pane="busy") == "running"
+
+
+def test_a_stale_running_or_waiting_row_with_a_finished_pane_is_idle():
+    # F6 said running for 8 days while its pane showed a finished turn.
+    assert state(job_status="running", cpu_rate=0.4, pane="idle") == "idle"
+    assert state(job_status="waiting", cpu_rate=0.4, pane="idle") == "idle"
+    # ...but any live sign still wins.
+    assert state(job_status="running", cpu_rate=9.0, pane="idle") == "running"
+    assert state(job_status="running", cpu_rate=0.4, pane="idle", transcript_age=5.0) == "running"
 
 
 def test_a_busy_pane_wins_over_a_quiet_cpu():

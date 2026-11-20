@@ -600,9 +600,13 @@ def classify(
     that looks busy to ANY source is never offered as reapable — the mistake
     that matters is the other one.
     """
-    if job_status == "running":
+    # A job row stays "running" or "waiting" long after its turn ends (F6 sat
+    # idle 8 days), so the row alone can't hold the button back. Only a pane
+    # that positively shows a finished turn can override it, and every busy
+    # check below still runs first.
+    if job_status == "running" and pane != "idle":
         return "running", "the concierge has this job registered as running"
-    if job_status == "waiting":
+    if job_status == "waiting" and pane != "idle":
         return "waiting", "blocked on you — it asked a question and is holding it"
     if pane == "busy":
         return "running", "its pane is drawing a live turn timer"
@@ -616,6 +620,8 @@ def classify(
         return "unknown", "no CPU sample yet — give it half a minute"
     if protected:
         return "idle", f"idle at {cpu_rate:.1f} ticks/s"
+    if job_status in ("running", "waiting"):
+        return "idle", f"row says {job_status}, but its turn ended — idle at {cpu_rate:.1f} ticks/s"
     if job_status in config.FINISHED_STATUSES:
         return "finished", f"reported {job_status}, idle at {cpu_rate:.1f} ticks/s"
     if job_status in config.CLOSED_STATUSES:
