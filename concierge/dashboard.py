@@ -44,7 +44,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from concierge import app_api, config, recording, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
+from concierge import app_api, config, practice, recording, registry, sessions, settings as settings_mod, spawn, taskchats, ticktick, tmuxctl
 
 # Fast enough that a reap shows up on the next poll, slow enough that the
 # dashboard is not itself a load on the machine it exists to relieve. One poll
@@ -506,6 +506,12 @@ def handler_for(sampler: Sampler):
             if self._route() in ("/review", "/review/"):
                 self._send(200, TASKS_HTML.with_name("review.html").read_bytes(), "text/html; charset=utf-8")
                 return
+            if self._route() in ("/practice", "/practice/"):
+                self._send(200, TASKS_HTML.with_name("practice.html").read_bytes(), "text/html; charset=utf-8")
+                return
+            if self._route().startswith("/api/practice/"):
+                self._json(*practice.get(self._route()))
+                return
             if self._route() == "/appbar.js":
                 self._send(200, TASKS_HTML.with_name("appbar.js").read_bytes(), "text/javascript; charset=utf-8")
                 return
@@ -572,6 +578,11 @@ def handler_for(sampler: Sampler):
                     return
                 handle = task_chat_request if self._route() == "/api/task-chat" else ticktick_update
                 self._json(*handle(self.headers, self.rfile.read(length)))
+                return
+            if self._route().startswith("/api/practice/"):
+                length = int(self.headers.get("Content-Length") or 0)
+                body = _read_post(self.headers, self.rfile.read(min(length, MAX_BODY)))
+                self._json(*(body if isinstance(body, tuple) else practice.post(self._route(), body)))
                 return
             if self._route() == "/api/jobs/remove":
                 length = int(self.headers.get("Content-Length") or 0)

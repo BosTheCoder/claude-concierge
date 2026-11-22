@@ -393,6 +393,7 @@ def ensure_up_cmd():
     typer.echo(run_heartbeat())
     typer.echo(run_lanes())
     typer.echo(run_later())
+    typer.echo(run_practice())
     dash = run_dashboard()
     typer.echo(dash)
     typer.echo(run_threads(dash))
@@ -581,6 +582,16 @@ def run_later() -> str:
         return later.run_due()
     except Exception as exc:  # noqa: BLE001 - deliberately total
         return f"later-error: {exc}"
+
+
+def run_practice() -> str:
+    """The Practice pane's daily reminder rides ensure-up too (see practice.py). Same total guard."""
+    try:
+        from concierge import practice
+
+        return practice.remind()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"practice-error: {exc}"
 
 
 def run_threads(dash: str) -> str:

@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>Practice</title>
+<!-- His Notion interview questions, five at a time (practice.py). Works with no signal: the deck and
+     what he has done live in localStorage; ratings go through the app's outbox (sw.js) and the server
+     logs each one once, keyed by the id made here. Notion stays the scheduler. -->
+<style>
+  :root { --bg:#fff; --fg:#1d2024; --muted:#5d636b; --card:#f3f4f6; --line:#e3e5e8; --accent:#2f6fde;
+    --again:#c0392b; --hard:#b9770e; --good:#1e8449; --easy:#2f6fde; color-scheme:light }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e7e9ec; --muted:#9aa1aa; --card:#1d2026; --line:#2a2e35;
+    --accent:#6c9cf0; --again:#ff7b6e; --hard:#f0b45a; --good:#5fd18a; --easy:#7fb0ff; color-scheme:dark } }
+  * { box-sizing:border-box }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui, -apple-system, sans-serif }
+  header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:8px; padding:10px 16px;
+    background:var(--bg); border-bottom:1px solid var(--line) }
+  header h1 { margin:0; font-size:18px; flex:1 }
+  .chip { font-size:14px; color:var(--muted); white-space:nowrap }
+  .icon { width:44px; height:44px; border-radius:22px; border:1px solid var(--line); background:var(--card); color:inherit;
+    font-size:18px; cursor:pointer; flex:none }
+  main { max-width:640px; margin:0 auto; padding:16px 16px calc(var(--appbar, 0px) + 150px) }
+  .kind { font-size:13px; color:var(--muted); margin-bottom:6px }
+  .q { font-size:21px; line-height:1.35; font-weight:650; margin:0 0 8px; overflow-wrap:anywhere }
+  .ctx { color:var(--muted); white-space:pre-wrap; margin:0 0 12px; font-size:15px }
+  textarea { width:100%; min-height:110px; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--card);
+    color:inherit; font:inherit; resize:vertical }
+  .ans { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin:12px 0;
+    white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px }
+  .ans b { display:block; font-size:13px; color:var(--muted); font-weight:600; margin-bottom:4px; white-space:normal }
+  .note { color:var(--muted); font-size:14px; margin:8px 0 }
+  .bad { color:var(--again) }
+  .dock { position:fixed; left:0; right:0; bottom:var(--appbar, 0px); z-index:4; padding:10px 16px calc(env(safe-area-inset-bottom) + 10px);
+    background:var(--bg); border-top:1px solid var(--line) }
+  .dock > div { max-width:640px; margin:0 auto; display:flex; gap:8px }
+  .btn { flex:1; min-height:52px; border:0; border-radius:14px; background:var(--accent); color:#fff; font:inherit; font-weight:650; cursor:pointer }
+  .btn.ghost { background:var(--card); color:inherit; border:1px solid var(--line) }
+  .btn:disabled { opacity:.5 }
+  .small { min-height:44px; font-size:15px; font-weight:600; width:100%; margin:4px 0 }
+  .rate { flex:1; min-height:64px; border:0; border-radius:14px; color:#fff; font:inherit; font-weight:700; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px }
+  .rate span { font-size:12px; font-weight:500; opacity:.9 }
+  @media (prefers-color-scheme: dark) { .rate { color:#14161a } }
+  .Again { background:var(--again) } .Hard { background:var(--hard) } .Good { background:var(--good) } .Easy { background:var(--easy) }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(var(--appbar, 0px) + 100px); z-index:9;
+    background:var(--fg); color:var(--bg); padding:10px 16px; border-radius:20px; font-size:15px; transition:opacity .3s }
+  .toast[hidden] { display:block; opacity:0; pointer-events:none }
+  h2 { font-size:20px; margin:4px 0 12px }
+  .moved { list-style:none; padding:0; margin:0 0 16px }
+  .moved li { display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:15px }
+  .moved li span:first-child { flex:none; width:22px; text-align:center }
+  .moved li small { display:block; color:var(--muted) }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin:10px 0 }
+  dialog { width:min(520px, calc(100vw - 32px)); border:1px solid var(--line); border-radius:16px; background:var(--bg); color:var(--fg); padding:16px }
+  dialog::backdrop { background:#0008 }
+  dialog label { display:flex; align-items:center; gap:10px; min-height:44px }
+  dialog input[type=checkbox] { width:22px; height:22px }
+  dialog input[type=time] { min-height:44px; font:inherit; padding:0 10px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:inherit }
+  dialog h3 { margin:14px 0 4px; font-size:16px }
+</style>
+<script src="/claude/appbar.js" defer></script>
+<script src="/claude/claude.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>Practice</h1>
+  <span class="chip" id="progress"></span>
+  <span class="chip" id="streak"></span>
+  <button class="icon" id="gear" aria-label="Settings">⚙</button>
+  <button class="icon" id="ask" aria-label="Ask Claude about this question">✦</button>
+</header>
+<main id="main"><p class="note">Loading your questions…</p></main>
+<div class="dock" id="dock" hidden><div id="dockrow"></div></div>
+<div class="toast" id="toast" hidden></div>
+<dialog id="settings">
+  <h2>Settings</h2>
+  <h3>Today's questions come from</h3>
+  <div id="typeboxes"></div>
+  <h3>Daily reminder</h3>
+  <p class="note">One Telegram message, only if you haven't practised yet. Never 21:00–08:00 or in the Sabbath.</p>
+  <label><input type="time" id="remind" min="08:00" max="20:59"> <button class="btn ghost small" style="width:auto;padding:0 14px" id="remindoff" type="button">Off</button></label>
+  <p class="note" id="setmsg"></p>
+  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn ghost" id="setcancel" type="button">Cancel</button><button class="btn" id="setsave" type="button">Save</button></div>
+</dialog>
+<script>
+const API = "/claude/api/practice", SIZE = 5, RATINGS = ["Again", "Hard", "Good", "Easy"];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const londonDay = (t = new Date()) => t.toLocaleDateString("en-CA", {timeZone: "Europe/London"});
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+const days = n => n === 1 ? "tomorrow" : `in ${n} days`;
+
+let deck = load("practice-deck", null);
+let done = load("practice-done", {});   // question id -> {rating, at, day}: what he did here, kept 3 days
+let session = null;                      // {items, i, results}
+let state = {};                          // the current question's screen: {revealed, typed, saved, grading, graded}
+
+for (const [id, d] of Object.entries(done)) if (Date.now() - Date.parse(d.at) > 3 * 864e5) delete done[id];
+keep("practice-done", done);
+
+function chosen() {
+  const all = deck?.types || [];
+  const saved = load("practice-types", null);
+  return saved ? all.filter(t => saved.includes(t)) : all;
+}
+function queue() {
+  const types = chosen();
+  return (deck?.questions || []).filter(q => types.includes(q.type) && !done[q.id]);
+}
+function todayCount() { const t = londonDay(); return Object.values(done).filter(d => d.day === t).length; }
+function streak() {
+  if (!deck?.streak) return null;
+  const fresh = deck.day === londonDay(), local = todayCount();
+  const k = Math.min(2, Math.max(fresh ? deck.today : 0, local));
+  const s = fresh ? deck.streak[k] : {...deck.streak[Math.min(2, deck.today)]};
+  if (!fresh && local) s.days += 1;
+  return s;
+}
+function header() {
+  const s = streak();
+  $("streak").textContent = s ? `🔥 ${s.days}` : "";
+  $("progress").textContent = session && session.i < session.items.length ? `${session.i + 1} / ${session.items.length}` : "";
+}
+function dock(html) { $("dockrow").innerHTML = html; $("dock").hidden = !html; }
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.hidden = true, 1800);
+}
+
+function start() {
+  const items = queue().slice(0, SIZE);
+  session = {items, i: 0, results: []};
+  show();
+}
+function current() { return session?.items[session.i]; }
+
+function show() {
+  header();
+  const q = current();
+  if (!deck) { $("main").innerHTML = `<p class="note">No questions downloaded yet. Open this once with signal.</p>`; return dock(""); }
+  if (!q) return session.results.length ? end() : empty();
+  state = {revealed: false, typed: state.qid === q.id ? state.typed : "", qid: q.id};
+  render();
+}
+
+function render() {
+  const q = current();
+  const answers = q.answers.map(a => `<div class="ans">${a.title && a.title.trim() !== q.title.trim() ? `<b>${esc(a.title)}</b>` : ""}${esc(a.text) || "<i>(empty)</i>"}</div>`).join("");
+  let after = "";
+  if (state.revealed) {
+    after = answers || `<p class="note">No saved answer yet.</p>`;
+    if (!q.answers.length && state.typed.trim())
+      after += state.saved ? `<p class="note">Saved as your answer ✓</p>` : `<button class="btn ghost small" id="saveans">Save what I wrote as my answer</button>`;
+    if (state.typed.trim() && q.gradable && !state.graded)
+      after += `<button class="btn ghost small" id="grade" ${state.grading ? "disabled" : ""}>${state.grading ? "The grader is reading it…" : "Ask the /drill grader instead"}</button>`;
+    if (state.typed.trim() && !q.gradable) after += `<p class="note">The /drill grader has no rubric for ${esc(q.type)} yet: rate it yourself.</p>`;
+    if (state.graded) after += `<div class="stat"><b>${esc(state.graded.rating)}</b> from the grader. Back ${days(q.back_in[state.graded.rating])}.<div class="note" style="white-space:pre-wrap">${esc(state.graded.feedback)}</div></div>`;
+    if (state.error) after += `<p class="note bad">${esc(state.error)}</p>`;
+  }
+  $("main").innerHTML = `<div class="kind">${esc(q.type)} · ${esc(q.topic)}${q.last ? ` · last ${esc(q.last)}` : q.attempts ? "" : " · new"}</div>
+    <p class="q">${esc(q.title)}</p>${q.context ? `<p class="ctx">${esc(q.context)}</p>` : ""}
+    <textarea id="typed" placeholder="Answer in your head, or type it (the keyboard mic dictates)">${esc(state.typed)}</textarea>${after}`;
+  $("typed").addEventListener("input", e => state.typed = e.target.value);
+  $("saveans")?.addEventListener("click", saveAnswer);
+  $("grade")?.addEventListener("click", askGrader);
+  if (state.graded) dock(`<button class="btn" id="next">Next</button>`), $("next").onclick = next;
+  else if (state.revealed) {
+    dock(RATINGS.map(r => `<button class="rate ${r}" data-r="${r}">${r}<span>${days(q.back_in[r])}</span></button>`).join(""));
+    $("dockrow").querySelectorAll("[data-r]").forEach(b => b.onclick = () => rate(b.dataset.r));
+  } else { dock(`<button class="btn" id="reveal">Reveal answer</button>`); $("reveal").onclick = () => { state.revealed = true; render(); }; }
+}
+
+// Every write gets an id here, so the server logs it once however many times it arrives.
+// No service worker yet (first visit) and no signal: kept in "practice-unsent" and sent on the next chance.
+async function send(path, body, label) {
+  const unsent = load("practice-unsent", []);
+  try {
+    const r = await fetch(`${API}/${path}`, {method: "POST", body: JSON.stringify(body),
+      headers: {"Content-Type": "application/json", "X-Outbox-Label": encodeURIComponent(label)}});
+    if (r.ok || (r.status >= 400 && r.status < 500)) return r;
+  } catch {}
+  if (!unsent.some(u => u.body.id === body.id)) keep("practice-unsent", [...unsent, {path, body, label}]);
+  return null;
+}
+async function resend() {
+  for (const u of load("practice-unsent", [])) {
+    try {
+      const r = await fetch(`${API}/${u.path}`, {method: "POST", body: JSON.stringify(u.body), headers: {"Content-Type": "application/json"}});
+      if (r.ok || (r.status >= 400 && r.status < 500)) keep("practice-unsent", load("practice-unsent", []).filter(x => x.body.id !== u.body.id));
+    } catch { return; }
+  }
+}
+
+function rate(rating, graded) {
+  const q = current(), at = new Date().toISOString();
+  done[q.id] = {rating, at, day: londonDay()};
+  keep("practice-done", done);
+  session.results.push({q, rating});
+  if (!graded) send("attempt", {id: uid(), question: q.id, rating, answer: state.typed.trim(), at}, `Practice: ${q.title.slice(0, 50)} · ${rating}`);
+  toast(`Back ${days(q.back_in[rating])}`);
+  next();
+}
+function next() { session.i += 1; state = {}; show(); }
+
+async function saveAnswer() {
+  const q = current();
+  state.saved = true; render();
+  send("answer", {id: uid(), question: q.id, text: state.typed.trim()}, `Practice answer: ${q.title.slice(0, 50)}`);
+}
+
+async function askGrader() {
+  const q = current();
+  if (!navigator.onLine) { state.error = "The grader needs signal. Rate it yourself, or try again when you're back online."; return render(); }
+  state.grading = true; state.error = ""; render();
+  try {
+    const r = await fetch(`${API}/grade`, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: uid(), question: q.id, answer: state.typed.trim(), at: new Date().toISOString()})});
+    const j = await r.json();
+    if (!r.ok || !j.rating) throw new Error(j.error || `error ${r.status}`);
+    state.graded = j;
+    done[q.id] = {rating: j.rating, at: new Date().toISOString(), day: londonDay()};
+    keep("practice-done", done);
+    session.results.push({q, rating: j.rating});
+  } catch (e) { state.error = `The grader didn't answer (${e.message}). Rate it yourself.`; }
+  state.grading = false; render();
+}
+
+function end() {
+  header();
+  const rank = r => RATINGS.indexOf(r);
+  const moved = session.results.map(({q, rating}) => {
+    const up = !q.last ? rank(rating) >= 2 : rank(rating) > rank(q.last), down = q.last && rank(rating) < rank(q.last);
+    return `<li><span>${up ? "↑" : down ? "↓" : "→"}</span><span>${esc(q.title)}<small>${q.last ? `${esc(q.last)} → ` : ""}${esc(rating)} · back ${days(q.back_in[rating])}</small></span></li>`;
+  }).join("");
+  const byTopic = {};
+  for (const {q, rating} of session.results) (byTopic[q.topic] ??= []).push(rank(rating));
+  const weakest = Object.entries(byTopic).map(([t, rs]) => [t, rs.reduce((a, b) => a + b, 0) / rs.length]).sort((a, b) => a[1] - b[1])[0];
+  const s = streak(), ups = session.results.filter(({q, rating}) => !q.last ? rank(rating) >= 2 : rank(rating) > rank(q.last)).length;
+  const left = queue().length;
+  $("main").innerHTML = `<h2>${session.results.length} done${ups ? `, ${ups} went up` : ""}</h2><ul class="moved">${moved}</ul>
+    ${weakest ? `<div class="stat">Weakest topic today: <b>${esc(weakest[0])}</b></div>` : ""}
+    ${s ? `<div class="stat">🔥 <b>${s.days} day${s.days === 1 ? "" : "s"}</b> in a row · ❄ ${s.freezes} freeze${s.freezes === 1 ? "" : "s"} ready${s.repair ? `<div class="note">Two questions today also covers the day you missed.</div>` : ""}</div>` : ""}
+    <p class="note">${left ? `${left} more waiting.` : "That's everything due for now."}</p>`;
+  dock(left ? `<button class="btn ghost" id="stop">Stop</button><button class="btn" id="more">5 more</button>` : `<button class="btn ghost" id="stop">Done</button>`);
+  $("more")?.addEventListener("click", start);
+  $("stop").onclick = () => { session = {items: [], i: 0, results: []}; empty(true); };
+}
+function empty(stopped) {
+  header();
+  const left = queue().length;
+  $("main").innerHTML = stopped ? `<p class="q">Nice one. See you tomorrow.</p>${left ? `<p class="note">${left} more are waiting whenever you want them.</p>` : ""}`
+    : `<p class="q">Nothing due in ${esc(chosen().join(", ") || "the rounds you picked")}.</p><p class="note">Questions come back here as they fall due. ⚙ picks other rounds.</p>`;
+  dock(left ? `<button class="btn" id="more">${stopped ? "5 more" : "Start"}</button>` : "");
+  $("more")?.addEventListener("click", start);
+}
+
+// Settings: rounds are kept on this phone; the reminder time on the PC, which sends it.
+$("gear").onclick = async () => {
+  const types = chosen();
+  $("typeboxes").innerHTML = (deck?.types || []).map(t => `<label><input type="checkbox" value="${esc(t)}" ${types.includes(t) ? "checked" : ""}>${esc(t)}</label>`).join("") || `<p class="note">No rounds yet.</p>`;
+  $("remind").value = load("practice-remind", "");
+  $("setmsg").textContent = "";
+  $("settings").showModal();
+  try { const r = await (await fetch(`${API}/settings`)).json(); $("remind").value = r.remind || ""; keep("practice-remind", r.remind || ""); } catch {}
+};
+$("remindoff").onclick = () => $("remind").value = "";
+$("setcancel").onclick = () => $("settings").close();
+$("setsave").onclick = async () => {
+  const picked = [...$("typeboxes").querySelectorAll("input:checked")].map(i => i.value);
+  keep("practice-types", picked);
+  const remind = $("remind").value;
+  if (remind !== load("practice-remind", "")) {
+    try {
+      const r = await fetch(`${API}/settings`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({remind})});
+      const j = await r.json();
+      if (!r.ok) { $("setmsg").textContent = j.error; return; }
+      keep("practice-remind", remind);
+    } catch { $("setmsg").textContent = "The reminder time needs signal to save. Your rounds are saved."; return; }
+  }
+  $("settings").close();
+  if (!session || !session.results.length) start();
+};
+
+$("ask").onclick = () => window.claudeAsk?.({title: "Practice question", cwd: "~/projects/personal/tasks",
+  placeholder: "What do you want to know about this question?",
+  context: () => { const q = current(); return q ? `Practice pane, interview question from his Notion bank.\nQuestion: ${q.title}\nRound: ${q.type} · ${q.topic}\nNotion: ${q.url}\n${state.typed ? `His answer so far:\n${state.typed}\n` : ""}${q.answers.map(a => `Saved answer:\n${a.text}`).join("\n\n")}` : "Practice pane, between sessions."; }});
+
+async function refresh() {
+  try {
+    const r = await fetch(`${API}/deck`);
+    if (!r.ok) return;
+    const fresh = await r.json();
+    if (deck && fresh.built <= deck.built) return;  // the worker's offline copy of the deck we already have
+    const first = !deck;
+    deck = fresh; keep("practice-deck", deck);
+    if (first || !session || (!session.results.length && session.i === 0 && !state.revealed && !state.typed)) start(); else header();
+  } catch {}
+}
+
+// A press on the dock mustn't take focus from the answer box first: that brings the app bar back, the dock
+// jumps 60px, and the release lands on whatever moved under the finger (Reveal did nothing).
+$("dock").addEventListener("mousedown", e => e.preventDefault());
+addEventListener("online", () => { resend(); refresh(); });
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && resend());
+if (deck) start(); else show();
+resend(); refresh();
+</script>
+</body>
+</html>

@@ -5,7 +5,9 @@
 // when the network is back (Background Sync, or the next time a pane opens). appbar.js lists them.
 const PAGES = "concierge-pages-v1", OUTBOX = "outbox";
 const PANES = ["/claude/", "/brief/", "/money/", "/inbox/"];  // not /claude/vault: a live screen, nothing to keep
-const QUEUED = /^\/claude\/api\/(tt\/update|threads\/[^/]+\/(answer|say|undo))$/;
+const QUEUED = /^\/claude\/api\/(tt\/update|threads\/[^/]+\/(answer|say|undo)|practice\/(attempt|answer))$/;
+// Practice opens on the Tube: its page comes from the last copy at once and is refreshed behind it.
+const FIRST = /^\/claude\/practice\/?$/;
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
@@ -20,6 +22,11 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET" || req.headers.get("Accept")?.includes("text/event-stream") || req.headers.has("Range")) return;
   // Tasks keeps its own last copy, with offline edits applied: an older cached list would undo them on screen.
   if (url.pathname.startsWith("/claude/api/tt/")) return;
+  if (FIRST.test(url.pathname)) return e.respondWith(caches.match(req, {ignoreVary: true}).then(old => {
+    const net = fetch(req).then(r => { if (r.status === 200) { const c = r.clone(); e.waitUntil(caches.open(PAGES).then(p => p.put(req, c))); } return r; });
+    if (old) { e.waitUntil(net.catch(() => {})); return old; }
+    return net;
+  }));
   e.respondWith(read(req, e));
 });
 

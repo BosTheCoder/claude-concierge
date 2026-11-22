@@ -12,3 +12,6 @@ task-chats.json
 ticktick-counts.json
 threads.db
 threads.db-*
+practice.db
+practice-cache.json
+practice-cache.tmp

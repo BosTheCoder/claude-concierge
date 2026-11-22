@@ -22,6 +22,8 @@
     {id: "inbox", href: "/inbox/", icon: "✉", name: "Inbox"},
     // Plannotator Inbox, framed so it stays in the app (it lives on :45581, owner-only).
     {id: "review", href: "/claude/review", icon: "✎", name: "Review"},
+    // His Notion interview questions, five at a time, offline (practice.html).
+    {id: "practice", href: "/claude/practice", icon: "◎", name: "Practice"},
     {id: "brief", href: "/brief/", icon: "☀", name: "Brief"},
     {id: "money", href: "/money/", icon: "£", name: "Money"},
     // The vault browser's viewer, proxied by the concierge so it opens inside the app.
