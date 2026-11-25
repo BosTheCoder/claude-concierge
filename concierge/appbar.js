@@ -31,6 +31,17 @@
     {id: "browser", href: "/claude/vault/", icon: "◳", name: "Browser"},
     {id: "apps", href: "/", icon: "⌂", name: "Apps"},  // the tailnet home page: every app he has
   ];
+  // A pane's link with target=_blank (Brief → Inbox chat) would open a Chrome tab on top of the installed app.
+  // Open it in place instead, as a pane. Ctrl/Cmd/Shift-click still gets a new tab.
+  document.addEventListener("click", e => {
+    const a = e.target.closest?.('a[target="_blank"][href]');
+    if (!a || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const u = new URL(a.href, location.href);
+    const p = u.pathname.replace(/\/$/, "");
+    if (u.origin !== location.origin || !PANES.some(({href}) => href !== "/" && (p === href.replace(/\/$/, "") || p.startsWith(href.replace(/\/$/, "") + "/")))) return;
+    e.preventDefault();
+    location.assign(u.href);
+  });
   const DEFAULT = {order: PANES.map(p => p.id), main: 4};
   const KEY = "appbar-layout", API = "/claude/api/settings/appbar";
   // Saved order first, then any pane added since (it lands at the end, under More).
