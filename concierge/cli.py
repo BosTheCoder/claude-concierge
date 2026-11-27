@@ -394,6 +394,7 @@ def ensure_up_cmd():
     typer.echo(run_lanes())
     typer.echo(run_later())
     typer.echo(run_practice())
+    typer.echo(run_usage())
     dash = run_dashboard()
     typer.echo(dash)
     typer.echo(run_threads(dash))
@@ -592,6 +593,20 @@ def run_practice() -> str:
         return practice.remind()
     except Exception as exc:  # noqa: BLE001 - deliberately total
         return f"practice-error: {exc}"
+
+
+def run_usage() -> str:
+    """The Claude usage alert at 80% (see usage.py). Same total guard."""
+    try:
+        from concierge import threads, usage
+
+        db = threads.connect()
+        try:
+            return usage.alert(db)
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        return f"usage-error: {exc}"
 
 
 def run_threads(dash: str) -> str:

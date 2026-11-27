@@ -11,10 +11,12 @@ import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 CREDS = Path.home() / ".claude" / ".credentials.json"
 URL = "https://api.anthropic.com/api/oauth/usage"
 WINDOWS = {"five_hour": ("Session", timedelta(hours=5)), "seven_day": ("Week", timedelta(days=7))}
+ALERT_AT = 80  # his pick, 2026-11-27: one ping per window once it passes this
 _cache: tuple[float, dict | None] = (0.0, None)
 
 
@@ -46,6 +48,29 @@ def get() -> dict | None:
         out = {"bars": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
     _cache = (time.time(), out)
     return out
+
+
+def alert(db, data: dict | None = None, *, sender=None) -> str:
+    """One tick of ensure-up: a Needs-me post in the "Claude usage" thread the first time a window
+    passes ALERT_AT. The window is known by when it resets, rounded to 10 minutes (the endpoint's
+    resets_at jitters by a second either side of the hour). Modes like Sabbath hold it as usual."""
+    from concierge import threads
+
+    data = data if data is not None else get()
+    sent = []
+    for b in (data or {}).get("bars", []):
+        window = str(round(datetime.fromisoformat(b["resets"]).timestamp() / 600))
+        key = f"usage_alerted_{b['name']}"
+        if b["pct"] < ALERT_AT or threads._kv(db, key) == window:
+            continue
+        threads._set_kv(db, key, window)
+        resets = datetime.fromisoformat(b["resets"]).astimezone(ZoneInfo("Europe/London")).strftime("%a %H:%M")
+        others = ", ".join(f"{o['name']} {o['pct']}%" for o in data["bars"] if o is not b)
+        thread = threads.find_or_create(db, job=None, title="Claude usage")
+        threads.post(db, thread, f"Claude {b['name'].lower()} usage at {b['pct']}%, resets {resets}."
+                     + (f" {others}." if others else ""), urgency="needs", sender=sender)
+        sent.append(b["name"])
+    return f"usage: alerted {', '.join(sent)}" if sent else "usage: under the line"
 
 
 if __name__ == "__main__":
