@@ -131,11 +131,21 @@
   .thumbs button { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:0; background:var(--ink); color:var(--card); cursor:pointer; line-height:22px; padding:0; }
   .gal { display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x mandatory; margin:8px 0; white-space:normal; scrollbar-width:none; }
   .gal img { height:260px; max-width:85%; flex:none; object-fit:cover; scroll-snap-align:start; border-radius:8px; background:var(--line); cursor:zoom-in; }
+  .deck { display:flex; gap:8px; overflow-x:auto; scroll-snap-type:x mandatory; margin:8px 0; white-space:normal; scrollbar-width:none; }
+  .dcard { flex:none; width:78%; max-width:340px; scroll-snap-align:start; background:var(--bg); border:1px solid var(--line); border-radius:12px; overflow:hidden; cursor:pointer; }
+  .dcard.rec { border-color:var(--amber); }
+  .dcard img { width:100%; height:180px; object-fit:cover; display:block; background:var(--line); }
+  .dcard b { display:block; padding:8px 10px 0; } .dcard.rec b::after { content:"  ★"; color:var(--amber); }
+  .dcard p { margin:4px 10px 10px; color:var(--dim); font-size:14px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .lightbox { position:fixed; inset:0; background:#000; z-index:20; }
   .lightbox .track { display:flex; height:100%; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; }
   .lightbox .track img { flex:none; width:100%; height:100%; object-fit:contain; scroll-snap-align:center; }
   .lightbox .bar { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
     background:linear-gradient(#000a, transparent); color:#fff; }
+  .lightbox .track > .slide { flex:none; width:100%; height:100%; overflow-y:auto; scroll-snap-align:center; background:var(--bg); padding:56px 0 24px; }
+  .slide .gal { display:block; margin:0; } .slide .gal img { width:100%; max-width:none; height:auto; border-radius:0; margin-bottom:4px; display:block; }
+  .slide h3 { margin:12px 14px 6px; font-size:20px; } .slide p { margin:0 14px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .slide .btn { margin:14px; } .slide p + .gal { margin-top:14px; }
   .lightbox .bar span { flex:1; } .lightbox .bar a { color:#fff; } .lightbox .bar button { color:#fff; font-size:22px; }
   textarea.capture { width:100%; min-height:40vh; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; }
 
@@ -173,9 +183,11 @@
 <script>
 const $ = (s, el=document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-// A linked photo reads as its file name: the photo itself is in the strip gal() draws under the text.
-const IMGURL = /^https:\/\/github\.com\/\S+\.(png|jpe?g|webp|gif)(\?raw=true)?$/i;
-const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${IMGURL.test(u) ? "📷 " + u.split("/").pop().split("?")[0] : u}</a>`);
+// A photo (a GitHub link to an image, or a media: ref from --image) isn't shown as text: it's in
+// the strip gal() draws under the text. Lines that were only a photo go with it.
+const IMGURL = /^(https:\/\/github\.com\/\S+\.(png|jpe?g|webp|gif)(\?raw=true)?|media:\S+)$/i;
+const linkify = s => esc(String(s ?? "").split("\n").filter(l => !IMGURL.test(l.trim())).join("\n").replace(/\n+$/, ""))
+  .replace(/https?:\/\/[^\s<]+/g, u => IMGURL.test(u) ? "" : `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 // A decision done in the vault browser gets a button straight to it: on the job's tab when it
 // passed `ask --browser`, else the browser as it is (an older ask that only says "vault browser").
 const VAULTURL = /https?:\/\/[^\s<]*\/vault\/[^\s<]*/;
@@ -186,20 +198,20 @@ function vaultBtn(m) {
 }
 // Photos a job linked (GitHub links to images): a strip he swipes, tap for the full-screen gallery.
 // The repos are private, so they come from the checkout on this machine (/api/img).
-const imgSrc = u => "api/img?u=" + encodeURIComponent(u);
+const imgSrc = u => u.startsWith("media:") ? "api/media?f=" + encodeURIComponent(u.slice(6)) : "api/img?u=" + encodeURIComponent(u);
 function gal(...texts) {
-  const urls = [...new Set(texts.flatMap(t => String(t ?? "").match(/https?:\/\/[^\s<]+/g) || []).filter(u => IMGURL.test(u)))];
+  const urls = [...new Set(texts.flatMap(t => String(t ?? "").match(/https?:\/\/[^\s<]+|media:\S+/g) || []).filter(u => IMGURL.test(u)))];
   return urls.length ? `<div class="gal" data-urls="${esc(JSON.stringify(urls))}">${urls.map((u, i) =>
     `<img loading="lazy" src="${imgSrc(u)}" data-gal="${i}" alt="Photo ${i + 1} of ${urls.length}">`).join("")}</div>` : "";
 }
 function lightbox(urls, at) {
   const box = document.createElement("div"); box.className = "lightbox";
-  box.innerHTML = `<div class="bar"><span></span><a href="${esc(urls[at])}" target="_blank" rel="noopener">GitHub</a><button class="icon" aria-label="Close">✕</button></div>`;
+  box.innerHTML = `<div class="bar"><span></span><button class="icon" aria-label="Close">✕</button></div>`;
   const track = document.createElement("div"); track.className = "track";
   track.innerHTML = urls.map((u, i) => `<img src="${imgSrc(u)}" alt="Photo ${i + 1} of ${urls.length}">`).join("");
   box.prepend(track); document.body.append(box);
   const n = () => { const i = Math.round(track.scrollLeft / track.clientWidth);
-    box.querySelector("span").textContent = `${i + 1} / ${urls.length}`; box.querySelector("a").href = urls[i]; };
+    box.querySelector("span").textContent = `${i + 1} / ${urls.length}`; };
   track.scrollLeft = at * track.clientWidth; n(); track.onscroll = n;
   const key = e => { if (e.key === "Escape") history.back();
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") track.scrollBy({left: (e.key === "ArrowRight" ? 1 : -1) * track.clientWidth, behavior: "smooth"}); };
@@ -209,8 +221,40 @@ function lightbox(urls, at) {
   addEventListener("popstate", shut); addEventListener("keydown", key);
   box.querySelector("button").onclick = () => history.back();
 }
+// Cards a job attached (--card): one per thing he's choosing between, swiped like a dating app.
+// The row shows each card's first photo and a few lines; tap one for the full-screen deck, where he
+// swipes between cards and scrolls down each one's photos and details, and can pick it from there.
+const decks = {};
+function deck(m) {
+  if (!m.cards) return "";
+  decks[m.id] = m;
+  return `<div class="deck">${m.cards.map((c, i) => `<div class="dcard${c.title === m.recommend ? " rec" : ""}" data-deck="${m.id}" data-i="${i}">
+    ${c.images[0] ? `<img loading="lazy" src="${imgSrc(c.images[0])}" alt="">` : ""}<b>${esc(c.title)}</b><p>${esc(c.text)}</p></div>`).join("")}</div>`;
+}
+function deckView(m, at) {
+  const live = m.options && m.answer == null;
+  const box = document.createElement("div"); box.className = "lightbox";
+  box.innerHTML = `<div class="bar"><span></span><button class="icon" aria-label="Close">✕</button></div>`;
+  const track = document.createElement("div"); track.className = "track";
+  // First photo, then the details and Pick, then the rest of the photos to scroll down through.
+  const pics = (c, from, to) => c.images.length > from ? `<div class="gal" data-urls="${esc(JSON.stringify(c.images))}">${c.images.slice(from, to).map((u, j) =>
+    `<img loading="lazy" src="${imgSrc(u)}" data-gal="${from + j}" alt="">`).join("")}</div>` : "";
+  track.innerHTML = m.cards.map(c => `<div class="slide">${pics(c, 0, 1)}<h3>${esc(c.title)}${c.title === m.recommend ? ` <small style="color:var(--amber);font-size:13px">★ Claude's pick</small>` : ""}</h3><p>${linkify(c.text)}</p>${live && m.options.includes(c.title) ? `<button class="btn" data-pick="${esc(c.title)}">Pick “${esc(c.title)}”</button>` : ""}${pics(c, 1)}</div>`).join("");
+  box.prepend(track); document.body.append(box);
+  const n = () => { const i = Math.round(track.scrollLeft / track.clientWidth);
+    box.querySelector("span").textContent = `${i + 1} / ${m.cards.length} · ${m.cards[i].title}`; };
+  track.scrollLeft = at * track.clientWidth; n(); track.onscroll = n;
+  history.pushState({deck: 1}, "");
+  // A photo opened from a card pushes its own state: going back from it lands here, so stay open.
+  const shut = () => { if (history.state?.deck) return; box.remove(); removeEventListener("popstate", shut); };
+  addEventListener("popstate", shut);
+  box.querySelector(".bar button").onclick = () => history.back();
+  track.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => { history.back(); choose(m.id, b.dataset.pick); });
+}
 document.addEventListener("click", e => { const img = e.target.closest("[data-gal]");
-  if (img) lightbox(JSON.parse(img.parentElement.dataset.urls), +img.dataset.gal); });
+  if (img) return lightbox(JSON.parse(img.parentElement.dataset.urls), +img.dataset.gal);
+  const card = e.target.closest("[data-deck]");
+  if (card) deckView(decks[card.dataset.deck], +card.dataset.i); });
 const LV = ["fyi","needs","urgent","critical"], LVNAME = {fyi:"FYI", needs:"Needs me", urgent:"Urgent", critical:"Critical"};
 const NEED = {decision:"Decision needed", reply:"Reply needed", nothing:"Nothing needed"};
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -339,12 +383,12 @@ async function thread(id, quiet) {
   const past = ms.filter(m => !shown.has(m));
   const top = (t.job ? `<p class="muted">Claude chat: ${t.chat_url ? `<a href="${esc(t.chat_url)}" target="_blank" rel="noopener">${esc(t.job)} ↗</a>` : esc(t.job)}</p>` : "")
     + (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}${gal(t.summary)}</div>` : "")
-    + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}${gal(latest.text)}</div>` : "");
+    + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}${gal(latest.text)}${deck(latest)}</div>` : "");
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
     ${open.filter(m => m.kind !== "close?").length > 1 ? `<div class="askrow"><button class="btn ghost" id="asideall">Not now on all ${open.filter(m => m.kind !== "close?").length}</button></div>` : ""}
-    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${vaultBtn(m)}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${deck(m)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${vaultBtn(m)}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
@@ -490,7 +534,7 @@ async function sendCard(id, b) {
 function msg(m) {
   const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
   const states = {sent:"✓ sent", picked:"✓✓ picked up", acted:"✓✓ acted on", failed:"⚠ not delivered: " + (m.error || "")};
-  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${gal(m.text, m.context)}${m.kind === "chat" && m.body && m.answer ? `<div class="em mine" style="margin-top:6px">${linkify(m.body)}</div>` : ""}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
+  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${gal(m.text, m.context)}${deck(m)}${m.kind === "chat" && m.body && m.answer ? `<div class="em mine" style="margin-top:6px">${linkify(m.body)}</div>` : ""}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
 }
 async function act(action, body) {
   try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }

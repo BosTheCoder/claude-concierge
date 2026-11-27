@@ -106,10 +106,22 @@ able to look at goes through `--file`, or through:
 which pushes that file and prints its URL, for when you need the link inside
 the text of a message rather than appended to it.
 
-**Photos he should see** (profiles, listings, screenshots, options to pick
-from) go on `post` or `ask` as `--image <path>`, repeated once per photo: the
-app shows them as a strip he swipes, and tap opens them full screen. Send the
-separate photos, not a contact sheet stitched into one image.
+**Photos he should see** (a screenshot, a page) go on `post` or `ask` as
+`--image <path>`, repeated once per photo: the app shows them as a strip he
+swipes, and tap opens them full screen. Send the separate photos, not a
+contact sheet stitched into one image.
+
+**Things he's choosing between** (houses, listings, products, profiles) are
+cards: one `--card <file.md>` per thing on `ask` (or `post`). The file's first
+line is the title, the option label exactly, so the card gets a Pick button;
+then the details he'd want, short; photos as `![](photo.jpg)` relative to the
+file. He swipes the cards under the question, taps one open full screen,
+scrolls its photos and details, swipes to the next. Don't also paste the
+details or photo links into the question or context.
+
+Photos only for him don't belong in the task folder: keep them in your
+scratchpad. `--image` and `--card` copy them into the app, which keeps them
+60 days.
 
 A link carries the *detail*, not the answer. If he has to act on something, the
 thing to act on goes in the message; the link is for everything behind it.

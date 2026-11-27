@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -667,7 +668,10 @@ def _open_thread(db, thread: str | None):
     return threads.find_or_create(db, job=t["job"], title=t["title"], pane=t["pane"], thread_id=t["thread_id"])
 
 
-IMAGE_HELP = "A photo to show him, repeat for each: pushed, then a swipeable strip in the app (one per photo, not a contact sheet)"
+IMAGE_HELP = "A photo to show him, repeat for each: a swipeable strip in the app (one per photo, not a contact sheet)"
+CARD_HELP = ("One thing he's choosing between (a house, a listing, a profile), repeat per card: a markdown file, "
+             "first line the title (the option label, so the card gets a Pick button), then the details, photos as "
+             "![](photo.jpg) relative to the file. He swipes the cards and taps one open full screen")
 
 
 def _vault(tab: str | None) -> str:
@@ -679,9 +683,35 @@ def _vault(tab: str | None) -> str:
     return f"\nBrowser: {config.SETTINGS.app.base_url}/vault/?tab={quote(tab)}"
 
 
+def _media(path: Path) -> str:
+    from concierge import app_api
+
+    try:
+        return app_api.store_media(path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+
 def _images(paths: list[str] | None) -> str:
-    """Each photo pushed and linked, one per line: the app turns these links into a gallery."""
-    return "".join("\n" + publish_and_link(p) for p in paths or [])
+    """Each photo copied into the app's store, one ref per line: the app draws them as a gallery."""
+    return "".join("\n" + _media(Path(p)) for p in paths or [])
+
+
+IMG_MD = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+
+
+def _cards(paths: list[str] | None) -> list[dict] | None:
+    """Each card file as {title, text, images}: its photos copied into the app's store."""
+    out = []
+    for path in paths or []:
+        f = Path(path).expanduser().resolve()
+        if not f.is_file():
+            raise typer.BadParameter(f"no card file: {path}")
+        raw = f.read_text()
+        images = [_media(f.parent / m) for m in IMG_MD.findall(raw)]
+        title, _, text = IMG_MD.sub("", raw).strip().partition("\n")
+        out.append({"title": title.lstrip("# ").strip(), "text": re.sub(r"\n{3,}", "\n\n", text).strip(), "images": images})
+    return out or None
 
 
 @app.command("post")
@@ -691,6 +721,7 @@ def post_cmd(
     urgency: str = typer.Option("needs", help="fyi | needs | urgent | critical"),
     file: str = typer.Option(None, help="A file to push and link, relative to your cwd"),
     image: list[str] = typer.Option(None, "--image", help=IMAGE_HELP),
+    card: list[str] = typer.Option(None, "--card", help=CARD_HELP),
 ):
     """Say something in your thread in his app."""
     from concierge import threads
@@ -700,7 +731,7 @@ def post_cmd(
     text += _images(image)
     with threads.connect() as db:
         th = _open_thread(db, thread)
-        threads.post(db, th, text, urgency=urgency)
+        threads.post(db, th, text, urgency=urgency, cards=_cards(card))
     typer.echo(f"posted to thread {th['id']}")
     _nudge_summary(th)
 
@@ -716,6 +747,7 @@ def ask_cmd(
     urgency: str = typer.Option("needs"),
     replaces: list[int] = typer.Option(None, "--replaces", help="Decision id(s) this one overtakes: withdrawn"),
     image: list[str] = typer.Option(None, "--image", help=IMAGE_HELP),
+    card: list[str] = typer.Option(None, "--card", help=CARD_HELP),
     browser: str = typer.Option(None, "--browser", help="He signs in or acts in the vault browser: part of your tab's URL "
                                 "(hmrc.gov.uk/business). The card gets a button straight to that tab"),
 ):
@@ -729,7 +761,7 @@ def ask_cmd(
     with threads.connect() as db:
         th = _open_thread(db, thread)
         mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend,
-                           context=context, why=why)
+                           context=context, why=why, cards=_cards(card))
         for old in replaces or []:
             threads.withdraw(db, old, f"replaced by decision {mid}")
     typer.echo(f"asked in thread {th['id']} (decision {mid}); his answer arrives as a message")

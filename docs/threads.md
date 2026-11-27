@@ -18,9 +18,12 @@ concierge rules                     # his global rules + delegations in force
 concierge decided "<q>" "<choice>" --rule "<rule>"   # refused without a delegation
 ```
 
-`post` and `ask` take `--image <path>`, repeated per photo: each is pushed and linked, and the app
-draws any GitHub link to an image as a swipeable strip, full screen on tap. The repos are private,
-so `/api/img` serves the file from the configured repo's checkout (image files inside it only).
+`post` and `ask` take `--image <path>`, repeated per photo, and `--card <file.md>`, repeated per thing
+he's choosing between (title line, details, `![](photo)` refs). Photos are copied into
+`~/.local/share/concierge/media/<day>/` (not pushed), served by `/api/media`, and a day folder older
+than 60 days is deleted the next time a photo is stored. The app draws photos as a swipeable strip and
+cards as a swipeable deck, full screen on tap, with Pick on a card whose title is an option. Older
+messages that link images on GitHub still draw: `/api/img` serves those from the repo's checkout.
 
 A concierge job's thread comes from `CONCIERGE_JOB_ID`. Any other session sets
 `CONCIERGE_THREAD_JOB` and `CONCIERGE_THREAD_PANE` (its tmux target) and names its

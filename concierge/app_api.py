@@ -64,6 +64,45 @@ def image(url: str, repos=None) -> tuple[int, bytes, str]:
     return 200, f.read_bytes(), IMAGE_TYPES[f.suffix.lower()]
 
 
+# Photos a job shows him (--image, --card) are copied here, not pushed to a repo: a day folder each,
+# and folders older than MEDIA_DAYS go the next time a photo is stored.
+MEDIA = Path.home() / ".local" / "share" / "concierge" / "media"
+MEDIA_DAYS = 60
+MEDIA_REF = re.compile(r"^media:(\d{4}-\d{2}-\d{2}/[0-9a-f]{16}\.\w+)$")
+
+
+def store_media(path: Path, root: Path | None = None, today: datetime | None = None) -> str:
+    """Copy a photo into the app's store and return its `media:` ref; prune day folders past MEDIA_DAYS."""
+    import hashlib
+    from datetime import timedelta
+
+    root, today = root or MEDIA, today or datetime.now()
+    path = Path(path).expanduser()
+    ext = path.suffix.lower()
+    if ext not in IMAGE_TYPES or not path.is_file():
+        raise ValueError(f"not a photo: {path}")
+    data = path.read_bytes()
+    day = today.strftime("%Y-%m-%d")
+    out = root / day / (hashlib.sha256(data).hexdigest()[:16] + ext)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    cutoff = (today - timedelta(days=MEDIA_DAYS)).strftime("%Y-%m-%d")
+    for d in root.iterdir():
+        if d.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d.name) and d.name < cutoff:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+    return f"media:{day}/{out.name}"
+
+
+def media(ref: str, root: Path | None = None) -> tuple[int, bytes, str]:
+    m = MEDIA_REF.match("media:" + ref)
+    f = (root or MEDIA) / m.group(1) if m else None
+    if not f or not f.is_file() or f.suffix.lower() not in IMAGE_TYPES:
+        return 404, b"gone", "text/plain"
+    return 200, f.read_bytes(), IMAGE_TYPES[f.suffix.lower()]
+
+
 def brief() -> dict | None:
     """The latest Morning Brief run: its headline and how many items need him."""
     app = config.SETTINGS.app

@@ -498,6 +498,10 @@ def handler_for(sampler: Sampler):
                 u = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("u") or [""])[0]
                 self._send(*app_api.image(u), cache="private, max-age=86400")
                 return
+            if route == "/api/media":  # photos a job attached (--image, --card), from the app's own store
+                f = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("f") or [""])[0]
+                self._send(*app_api.media(f), cache="private, max-age=86400")
+                return
             if route.startswith(("/api/threads", "/api/alarms/", "/api/settings", "/api/inbox/", "/api/skills")):
                 self._json(*app_api.get(route, urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))
                 return

@@ -83,7 +83,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
     for table, col in (("threads", "summary"), ("messages", "context"), ("messages", "why"), ("messages", "revised"),
-                       ("messages", "ref"), ("messages", "body")):
+                       ("messages", "ref"), ("messages", "body"), ("messages", "cards")):
         if col not in {c["name"] for c in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
     if not db.execute("SELECT 1 FROM modes LIMIT 1").fetchone() and not _kv(db, "modes_seeded"):
@@ -232,17 +232,17 @@ def find_or_create(db, *, job: str | None, title: str | None, pane: str | None =
 def post(db, thread: sqlite3.Row, text: str, *, author: str = "job", urgency: str = "fyi",
          options: list[str] | None = None, recommend: str | None = None, kind: str = "msg",
          context: str | None = None, why: str | None = None, ref: str | None = None, body: str | None = None,
-         sender=None) -> int:
+         cards: list[dict] | None = None, sender=None) -> int:
     if urgency not in LEVELS:
         raise ValueError(f"urgency must be one of {', '.join(LEVELS)}")
     if options and recommend and recommend not in options:
         raise ValueError("--recommend must be one of the options")
     t = _iso(now())
     cur = db.execute(
-        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, context, why, ref, body, created) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(thread, author, text, urgency, kind, options, recommend, context, why, ref, body, cards, created) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (thread["id"], author, text, urgency, kind, json.dumps(options) if options else None, recommend,
-         context, why, ref, body, t))
+         context, why, ref, body, json.dumps(cards) if cards else None, t))
     db.execute("UPDATE threads SET updated=?, status=CASE WHEN status='closed' AND ?='job' THEN 'open' ELSE status END "
                "WHERE id=?", (t, author, thread["id"]))
     if author != "me":
@@ -619,7 +619,8 @@ def detail(db, thread_id: int) -> dict:
     row = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
     if not row:
         raise KeyError(thread_id)
-    msgs = [dict(m) | {"options": json.loads(m["options"]) if m["options"] else None}
+    msgs = [dict(m) | {"options": json.loads(m["options"]) if m["options"] else None,
+                       "cards": json.loads(m["cards"]) if m["cards"] else None}
             for m in db.execute("SELECT * FROM messages WHERE thread=? ORDER BY id", (thread_id,))]
     d = delegation_for(db, thread_id)
     facts = json.loads(row["facts"])
