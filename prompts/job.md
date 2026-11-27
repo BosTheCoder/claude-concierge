@@ -29,8 +29,9 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   never wait on a question menu: you cannot use one.
 - **Anything that waits on him is an `ask` too, never a `post`**, so he taps
   instead of typing: "sign in to X" → `--option "I'm signed in" --option "Later
-  today" --option "You do it another way"`; "pay at the card step" → `"Paid"`,
-  `"Not now"`. Two to four buttons that fit the moment; he can still type.
+  today" --option "You do it another way"`, and in the vault browser add
+  `--browser <part of your tab's URL>` so the card opens straight on that tab;
+  "pay at the card step" → `"Paid"`, `"Not now"`. Two to four buttons that fit the moment; he can still type.
 - **An email for him to send** is a Gmail draft (the gmail-drafts skill), then
   `{{CONCIERGE_BIN}} draft <gmail-draft-id>`: a card where he can change From,
   To, Subject and the text, and Send. Don't also paste the text in a `post`.

@@ -655,6 +655,15 @@ def _open_thread(db, thread: str | None):
 IMAGE_HELP = "A photo to show him, repeat for each: pushed, then a swipeable strip in the app (one per photo, not a contact sheet)"
 
 
+def _vault(tab: str | None) -> str:
+    """The vault browser in his app, on the tab named: the app draws it as an Open-the-browser button."""
+    if not tab:
+        return ""
+    from urllib.parse import quote
+
+    return f"\nBrowser: {config.SETTINGS.app.base_url}/vault/?tab={quote(tab)}"
+
+
 def _images(paths: list[str] | None) -> str:
     """Each photo pushed and linked, one per line: the app turns these links into a gallery."""
     return "".join("\n" + publish_and_link(p) for p in paths or [])
@@ -692,6 +701,8 @@ def ask_cmd(
     urgency: str = typer.Option("needs"),
     replaces: list[int] = typer.Option(None, "--replaces", help="Decision id(s) this one overtakes: withdrawn"),
     image: list[str] = typer.Option(None, "--image", help=IMAGE_HELP),
+    browser: str = typer.Option(None, "--browser", help="He signs in or acts in the vault browser: part of your tab's URL "
+                                "(hmrc.gov.uk/business). The card gets a button straight to that tab"),
 ):
     """A decision for him: buttons in the app. His tap comes back to you as a message.
     Check `concierge decisions` first: if one already open covers this, `concierge revise` it instead."""
@@ -699,7 +710,7 @@ def ask_cmd(
 
     if recommend and not (why or "").strip():
         raise typer.BadParameter("say why you'd pick it: --why")
-    context += _images(image)
+    context += _vault(browser) + _images(image)
     with threads.connect() as db:
         th = _open_thread(db, thread)
         mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend,

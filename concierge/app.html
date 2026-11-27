@@ -169,6 +169,14 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 // A linked photo reads as its file name: the photo itself is in the strip gal() draws under the text.
 const IMGURL = /^https:\/\/github\.com\/\S+\.(png|jpe?g|webp|gif)(\?raw=true)?$/i;
 const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${IMGURL.test(u) ? "📷 " + u.split("/").pop().split("?")[0] : u}</a>`);
+// A decision done in the vault browser gets a button straight to it: on the job's tab when it
+// passed `ask --browser`, else the browser as it is (an older ask that only says "vault browser").
+const VAULTURL = /https?:\/\/[^\s<]*\/vault\/[^\s<]*/;
+function vaultBtn(m) {
+  const all = [m.text, m.context, m.why].join(" ");
+  const href = (all.match(VAULTURL) || [/vault browser/i.test(all) ? "vault/" : ""])[0];
+  return href ? `<div class="askrow"><a class="btn" href="${esc(href)}" target="_blank" rel="noopener">◳ Open the browser</a></div>` : "";
+}
 // Photos a job linked (GitHub links to images): a strip he swipes, tap for the full-screen gallery.
 // The repos are private, so they come from the checkout on this machine (/api/img).
 const imgSrc = u => "api/img?u=" + encodeURIComponent(u);
@@ -316,7 +324,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${vaultBtn(m)}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
