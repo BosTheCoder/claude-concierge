@@ -559,7 +559,8 @@ def handler_for(sampler: Sampler):
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:
                     length = -1
-                if not 0 <= length <= MAX_BODY:
+                cap = app_api.MAX_START_BODY if self._route() == "/api/threads" else MAX_BODY  # New thread carries images
+                if not 0 <= length <= cap:
                     self._json(400, {"ok": False, "error": "bad body length"})
                     return
                 body = _read_post(self.headers, self.rfile.read(length))

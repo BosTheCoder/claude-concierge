@@ -119,6 +119,9 @@
   table { border-collapse:collapse; width:100%; font-size:14px; } td, th { padding:5px 6px; border-bottom:1px solid var(--line); text-align:right; }
   td:first-child, th:first-child { text-align:left; }
   .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:90px; background:#30363d; padding:8px 14px; border-radius:8px; font-size:14px; z-index:9; }
+  .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; } .thumbs:empty { display:none; }
+  .thumbs span { position:relative; } .thumbs img { width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--line); display:block; }
+  .thumbs button { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:0; background:var(--ink); color:var(--card); cursor:pointer; line-height:22px; padding:0; }
   textarea.capture { width:100%; min-height:40vh; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; }
 
   /* Desktop: use the width. Home: search and filters become a sticky left sidebar, threads a grid of cards.
@@ -471,16 +474,42 @@ function capture() {
   head("New thread", true);
   const p = new URLSearchParams(location.search);
   const shared = [p.get("title"), p.get("text"), p.get("url")].filter(Boolean).join("\n");
-  $("#main").innerHTML = `<textarea class="capture" id="cap" placeholder="What do you need? (tap the mic on the keyboard to talk)">${esc(shared)}</textarea>
-    <p><button class="btn" id="go">Start</button></p>`;
+  $("#main").innerHTML = `<textarea class="capture" id="cap" placeholder="What do you need? (tap the mic on the keyboard to talk; paste or drop images)">${esc(shared)}</textarea>
+    <div class="thumbs" id="thumbs"></div>
+    <p><button class="btn" id="go">Start</button> <label class="btn ghost">📎 Images<input type="file" id="pick" accept="image/*" multiple hidden></label></p>`;
   history.replaceState(null, "", location.pathname + location.hash);
   $("#cap").focus();
+  const imgs = [];  // data: URLs, in the order he added them
+  const draw = () => { $("#thumbs").innerHTML = imgs.map((u, i) => `<span><img src="${u}" alt="Image ${i + 1}"><button data-rm="${i}" aria-label="Remove image ${i + 1}">×</button></span>`).join("");
+    $("#thumbs").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { imgs.splice(+b.dataset.rm, 1); draw(); }); };
+  const add = async files => {
+    for (const f of files) if (f.type.startsWith("image/")) {
+      if (imgs.length >= 10) { toast("10 images at most"); break; }
+      try { imgs.push(await shrink(f)); } catch { toast(`Couldn't read ${f.name || "that image"}`); }
+    }
+    draw();
+  };
+  $("#pick").onchange = e => { add([...e.target.files]); e.target.value = ""; };
+  $("#cap").onpaste = e => { const fs = [...e.clipboardData.files]; if (fs.length) { e.preventDefault(); add(fs); } };
+  $("#main").ondragover = e => e.preventDefault();
+  $("#main").ondrop = e => { e.preventDefault(); add([...e.dataTransfer.files]); };
   $("#go").onclick = async () => {
-    const text = $("#cap").value.trim(); if (!text) return;
+    const text = $("#cap").value.trim(); if (!text && !imgs.length) return;
     $("#go").disabled = true; $("#go").textContent = "Starting…";
-    try { const r = await api("threads", {text}); toast("Started"); location.hash = `t=${r.id}`; }
+    try { const r = await api("threads", {text, images: imgs}); toast("Started"); location.hash = `t=${r.id}`; }
     catch (e) { toast(e.message); $("#go").disabled = false; $("#go").textContent = "Start"; }
   };
+}
+
+// An image as a data: URL. Small ones go as they are (screenshots stay sharp); big photos are
+// redrawn as JPEG no wider or taller than 2048px, so ten of them fit in one request.
+async function shrink(f) {
+  const read = b => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(b); });
+  if (f.size < 1.5e6 && /^image\/(jpeg|png|webp|gif)$/.test(f.type)) return read(f);
+  const bmp = await createImageBitmap(f), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+  const c = Object.assign(document.createElement("canvas"), {width: Math.round(bmp.width * k), height: Math.round(bmp.height * k)});
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return read(await new Promise(ok => c.toBlob(ok, "image/jpeg", 0.85)));
 }
 
 // --- settings: rules, modes, delegations, stats ----------------------------------------
