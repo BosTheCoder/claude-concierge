@@ -46,8 +46,9 @@
   .age { color:var(--dim); font-size:12px; font-weight:400; white-space:nowrap; }
   .brief { background:#132018; border:1px solid #23402c; border-radius:10px; padding:10px 12px; margin:4px 0 10px; display:block; color:inherit; text-decoration:none; }
   .brief b { color:var(--green); }
-  .usage { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin:4px 0 10px; font-size:14px; }
-  .usage .u { display:grid; grid-template-columns:96px 1fr auto; gap:8px; align-items:center; margin:3px 0; }
+  .usage { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin:4px 0 10px; font-size:14px;
+    display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; align-items:center; }
+  .usage .u { display:contents; }
   .usage .bar { position:relative; height:8px; background:var(--line); border-radius:99px; }
   .usage .bar i { position:absolute; inset:0 auto 0 0; border-radius:99px; background:var(--green); }
   .usage .bar i.amber { background:var(--amber); } .usage .bar i.red { background:var(--red); }
@@ -268,7 +269,7 @@ function poll(fn, ms) { clearInterval(timer); timer = setInterval(() => document
 function usageCard(u) {
   if (!u) return "";
   if (!u.bars.length) return `<div class="usage muted">Claude usage unavailable${u.error ? ": " + esc(u.error) : ""}</div>`;
-  const when = iso => { const d = new Date(iso), h = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  const when = iso => { const d = new Date(iso), h = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", hour12:false});
     return d.toDateString() === new Date().toDateString() ? h : `${d.toLocaleDateString([], {weekday:"short"})} ${h}`; };
   return `<div class="usage">${u.bars.map(b => {
     const c = b.pct >= 90 ? "red" : b.pct >= 75 || b.pct > b.elapsed + 10 ? "amber" : "";
