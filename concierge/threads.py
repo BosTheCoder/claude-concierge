@@ -320,6 +320,12 @@ def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None 
     if about is not None and park(db, about, "Asked about it"):
         tail = (f" (Decision {about} is off his list while you answer. If it still needs his call afterwards, "
                 f"bring it back with `concierge revise {about}`, with anything that changed.)")
+    elif about is None and (pending := open_decisions(db, thread_id)):
+        # A reply often settles or cancels what's waiting on him; the job clears those, not him.
+        listed = "; ".join(f'{r["id"]} ("{r["text"][:80]}")' for r in pending)
+        tail = (f" (Still on his list here: {listed}. If this message answers, cancels or changes any of them, "
+                "deal with that first: `concierge withdraw <id> \"<why>\"` for ones it settles, "
+                "`concierge revise <id>` for ones it changes. Email and chat cards too.)")
     problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}{tail}{skills.hint(text)}"), submitter=submitter)
     if problem and tail:
         _unpark(db, about)  # the job never heard, so nobody would bring it back
@@ -382,11 +388,13 @@ def card_sent(db, msg_id: int, *, answer: str, told: str, submitter=None) -> str
     return problem
 
 
-def park(db, msg_id: int, why: str) -> bool:
+def park(db, msg_id: int, why: str, *, cards: bool = False) -> bool:
     """Off his list without an answer: he asked about it, or set it aside. It comes back when the job
-    revises it or he taps Bring back. Email and chat cards stay: the job replaces those itself."""
+    revises it or he taps Bring back. Asking about an email or chat card doesn't park it: the job
+    replaces those itself. `cards`: his Not now, which does."""
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
-    if not msg or not msg["options"] or msg["answer"] is not None or msg["kind"] in (*CARDS, "close?"):
+    if (not msg or not msg["options"] or msg["answer"] is not None or msg["kind"] == "close?"
+            or (msg["kind"] in CARDS and not cards)):
         return False
     db.execute("UPDATE messages SET answer=?, answered_by='parked', answered_at=?, state=NULL, error=NULL WHERE id=?",
                (why, _iso(now()), msg_id))
@@ -397,12 +405,14 @@ def set_aside(db, msg_id: int, *, submitter=None) -> str | None:
     """His Not now: the decision leaves his list and the job is told to carry on without it,
     bringing it back only if it can't. Returns why it didn't reach the job, or None."""
     msg, thread = _decision(db, msg_id)
-    if not park(db, msg_id, "Set aside"):
-        raise ValueError("only a plain decision can be set aside")
+    if not park(db, msg_id, "Set aside", cards=True):
+        raise ValueError("this can't be set aside")
+    card = (" It is a draft he hasn't sent: don't send it or redraft it unless he asks."
+            if msg["kind"] in CARDS else "")
     body = (f'Kelvin set aside decision {msg_id} ("{msg["text"]}") without choosing: it is off his list. '
             "Carry on with whatever doesn't hang on it. If you can't move without his call, bring it back "
             f"with `concierge revise {msg_id}` once something changes (new facts, a deadline getting close), "
-            "saying what changed in --context. If it no longer matters, leave it.")
+            "saying what changed in --context. If it no longer matters, leave it." + card)
     problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
     db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else None, problem, msg_id))
     return problem

@@ -65,7 +65,9 @@ answers, so it doesn't sit there stale; the job is told to `revise N` if it stil
 needs his call, which puts it back with an alert. Not now sets it aside the same way
 and tells the job to carry on without it. Either way the row is `answered_by='parked'`,
 not answerable until it's back; Bring back in the app reopens it and tells the job.
-Email and chat cards and "Close it?" never park. If the question never reached the
+Asking about an email or chat card doesn't park it (the job replaces it), but Not now does, and the job is told not to send it. "Close it?" never parks. With two or more open, Not now on all clears them in one tap.
+
+When he types a reply in a thread that has open decisions, the job's copy lists them and tells it to withdraw or revise any his message settles, so a reply that changes course clears its own cards. If the question never reached the
 job, the decision stays on his list.
 
 ## Alerts

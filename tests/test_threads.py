@@ -274,3 +274,17 @@ def test_a_slash_message_tells_the_job_to_run_that_skill(db, monkeypatch):
     threads.say(db, th["id"], "just chatting", submitter=lambda pane, text: typed.append(text))
     assert "ai-toolkit:research" in typed[0] and "Skill tool" in typed[0]
     assert "Skill tool" not in typed[1]
+
+
+def test_his_reply_tells_the_job_which_decisions_it_may_have_settled_and_cards_can_be_set_aside(db, clock):
+    th = threads.find_or_create(db, job="Q1", title="Party", pane="concierge:Q1")
+    ask = threads.post(db, th, "Send Cokethorpe's form?", options=["Yes", "No"], sender=lambda *_: None)
+    card = threads.post(db, th, "Email to Kingswood", options=["Send"], kind="draft", sender=lambda *_: None)
+    typed = []
+    threads.say(db, th["id"], "hold off, I want to see photos first", submitter=lambda pane, text: typed.append(text))
+    assert f"{ask} (" in typed[-1] and f"{card} (" in typed[-1] and "withdraw" in typed[-1]
+    threads.set_aside(db, card, submitter=lambda pane, text: typed.append(text))  # Not now on an email card
+    assert [r["id"] for r in threads.open_decisions(db, th["id"])] == [ask] and "don't send it" in typed[-1]
+    threads.withdraw(db, ask, "seeing photos first")
+    threads.say(db, th["id"], "thanks", submitter=lambda pane, text: typed.append(text))
+    assert "Still on his list" not in typed[-1]  # nothing open, nothing listed

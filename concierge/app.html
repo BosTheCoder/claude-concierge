@@ -324,6 +324,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
+    ${open.filter(m => m.kind !== "close?").length > 1 ? `<div class="askrow"><button class="btn ghost" id="asideall">Not now on all ${open.filter(m => m.kind !== "close?").length}</button></div>` : ""}
     ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${vaultBtn(m)}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
@@ -350,6 +351,8 @@ async function thread(id, quiet) {
   $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
   $("#main").querySelectorAll("[data-aside]").forEach(b => b.onclick = () => decisionAct("setaside", +b.dataset.aside, "Set aside: Claude carries on without it"));
+  const all = $("#asideall");  // a reply that overtook several at once: clear them in one tap
+  if (all) all.onclick = async () => { for (const m of open.filter(m => m.kind !== "close?")) await decisionAct("setaside", m.id, "All set aside: Claude carries on without them"); };
   $("#main").querySelectorAll("[data-back]").forEach(b => b.onclick = () => decisionAct("bringback", +b.dataset.back, "Back on your list"));
   $("#main").querySelectorAll("[data-mail]").forEach(card => { const e = mails[card.dataset.mail].e;
     card.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => e[el.dataset.f] = el.dataset.f === "html" ? el.innerHTML : el.value); });
@@ -407,7 +410,7 @@ function convo(s, items, keep, noun) {
 }
 function cardShell(m, label, loading) {
   const s = mails[m.id], head = `<div class="who"><span class="dot ${m.urgency}"></span> ${label} · ${age(m.created)}</div>`;
-  const about = `<button class="btn ghost" data-about="${m.id}">Ask Claude to change it</button>`;
+  const about = `<button class="btn ghost" data-about="${m.id}">Ask Claude to change it</button><button class="btn ghost" data-aside="${m.id}">Not now</button>`;
   if (!s) { loadCard(m.id, m.kind); return [null, `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">${loading}</p></div>`]; }
   if (s.err) return [null, `<div class="ask mail">${head}${linkify(m.text)}<p class="muted">⚠ ${esc(s.err)}</p>
     <div class="askrow"><button class="btn ghost" data-mailretry="${m.id}">Try again</button>${about}</div></div>`];
