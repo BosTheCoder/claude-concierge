@@ -16,7 +16,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from concierge import chatdraft, config, emaildraft, inbox_waiting, registry, skills, spawn, threads
+from concierge import chatdraft, config, emaildraft, inbox_waiting, registry, skills, spawn, threads, usage
 
 APP_HTML = Path(__file__).with_name("app.html")
 ROUTE = re.compile(r"^/api/threads/(\d+)(?:/(\w+))?$")
@@ -97,7 +97,7 @@ def get(path: str, query: dict) -> tuple[int, dict]:
         if path == "/api/threads":
             q = (query.get("q") or [""])[0][:200]
             return 200, {"threads": threads.mark_working(threads.home(db, q=q, closed=bool(query.get("closed")))),
-                         "brief": brief(),
+                         "brief": brief(), "usage": usage.get(),
                          "mode": (m := threads.active_mode(db)) and m["name"]}
         if (m := ROUTE.match(path)) and m.group(2) in ("draft", "chat"):
             msg = db.execute("SELECT ref, body FROM messages WHERE id=? AND thread=? AND kind=?",

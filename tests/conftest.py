@@ -58,10 +58,11 @@ def no_real_threads_db(monkeypatch, tmp_path):
 def no_real_network(monkeypatch):
     """No test may reach Telegram or ntfy. On 2026-11-13 a threads test with no
     sender injected sent two junk messages to Kelvin's real Concierge chat."""
-    from concierge import telegram, threads
+    from concierge import telegram, threads, usage
 
     def refuse(*_a, **_k):
         raise AssertionError("test tried to reach the network; inject a sender/poster")
 
     monkeypatch.setattr(telegram, "_urlopen", refuse)
     monkeypatch.setattr(threads, "_post_ntfy", refuse)
+    monkeypatch.setattr(usage, "get", lambda: None)  # the home list asks Anthropic for his plan usage

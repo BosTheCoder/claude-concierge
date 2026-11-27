@@ -46,6 +46,12 @@
   .age { color:var(--dim); font-size:12px; font-weight:400; white-space:nowrap; }
   .brief { background:#132018; border:1px solid #23402c; border-radius:10px; padding:10px 12px; margin:4px 0 10px; display:block; color:inherit; text-decoration:none; }
   .brief b { color:var(--green); }
+  .usage { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin:4px 0 10px; font-size:14px; }
+  .usage .u { display:grid; grid-template-columns:96px 1fr auto; gap:8px; align-items:center; margin:3px 0; }
+  .usage .bar { position:relative; height:8px; background:var(--line); border-radius:99px; }
+  .usage .bar i { position:absolute; inset:0 auto 0 0; border-radius:99px; background:var(--green); }
+  .usage .bar i.amber { background:var(--amber); } .usage .bar i.red { background:var(--red); }
+  .usage .bar s { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--dim); }
   .fab { position:fixed; right:18px; bottom:calc(var(--appbar, 0px) + env(safe-area-inset-bottom) + 18px); width:58px; height:58px; border-radius:50%;
     border:0; background:var(--blue); color:#0e1116; font-size:30px; box-shadow:0 4px 14px #0008; cursor:pointer; }
   .muted { color:var(--dim); font-size:14px; }
@@ -141,7 +147,7 @@
     .side .chips { flex-wrap:wrap; overflow:visible; padding-bottom:12px; }
     .list, main:has(> .side) > p { grid-column:2; }
     .list { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:14px; }
-    .list > .brief, .list > p { grid-column:1 / -1; margin:0; }
+    .list > .brief, .list > .usage, .list > p { grid-column:1 / -1; margin:0; }
     .list > .row { margin:0; }
     main:has(> .menu) { display:grid; grid-template-columns:minmax(0,1fr) 380px; column-gap:32px; align-items:start; }
     main:has(> .menu) > * { grid-column:1; }
@@ -257,6 +263,18 @@ function head(title, back) { $("#title").textContent = title; $("#back").hidden 
 function poll(fn, ms) { clearInterval(timer); timer = setInterval(() => document.visibilityState === "visible" && fn(true), ms); }
 
 // --- home -------------------------------------------------------------------------------
+// Claude plan usage: the bar is what's used, the tick is how much of the window has gone.
+// Used ahead of the tick means he's burning faster than the window allows.
+function usageCard(u) {
+  if (!u) return "";
+  if (!u.bars.length) return `<div class="usage muted">Claude usage unavailable${u.error ? ": " + esc(u.error) : ""}</div>`;
+  const when = iso => { const d = new Date(iso), h = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+    return d.toDateString() === new Date().toDateString() ? h : `${d.toLocaleDateString([], {weekday:"short"})} ${h}`; };
+  return `<div class="usage">${u.bars.map(b => {
+    const c = b.pct >= 90 ? "red" : b.pct >= 75 || b.pct > b.elapsed + 10 ? "amber" : "";
+    return `<div class="u"><b>${b.name} ${b.pct}%</b><span class="bar"><i class="${c}" style="width:${Math.min(b.pct, 100)}%"></i><s style="left:${b.elapsed}%"></s></span><span class="muted">resets ${when(b.resets)}</span></div>`;
+  }).join("")}</div>`;
+}
 async function home(quiet) {
   head("Concierge", false);
   let d;
@@ -271,7 +289,7 @@ async function home(quiet) {
     <div class="side"><input class="search" id="q" placeholder="Search threads, open and closed" value="${esc(homeQ)}">
     <div class="chips">${chips("need", ["all","decision","reply","nothing"], {decision:"Decision", reply:"Reply", nothing:"FYI"})}</div>
     <div class="chips">${chips("urg", ["all","critical","urgent","needs","fyi"], LVNAME)}</div></div>
-    <div class="list">${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
+    <div class="list">${!homeQ && !showClosed ? usageCard(d.usage) : ""}${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
     ${rows.map(t => `<a class="row ${t.urgency}${t.working ? " working" : ""}" href="#t=${t.id}">
         <div class="t">${t.working ? `<i class="live" title="Claude is working on this"></i>` : ""}<span>${esc(t.title)}</span><span class="age">${age(t.updated)}</span></div>
         <div class="need ${t.needs}">${t.working ? `<span class="working">Working</span> · ` : ""}${t.status === "closed" ? "Closed" : NEED[t.needs]}${t.urgency !== "fyi" && t.needs !== "nothing" ? " · " + LVNAME[t.urgency] : ""}${t.floor ? " · turned down" : ""}</div>
