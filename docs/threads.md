@@ -32,6 +32,15 @@ His messages and taps are typed into the session's pane with `tmuxctl.submit`, a
 The row records sent → picked up (left the box) → acted on (the job's next post),
 or failed with the reason.
 
+## Skills from the app
+
+Typing `/` at the start of a message (or a New thread) lists the skills a job can run
+(`/api/skills`, from `concierge/skills.py`: enabled plugins, live folder for a directory
+marketplace, plus ~/.claude/skills), filtered as he types. His message reaches the job inside
+`[thread N] Kelvin says: ...`, so Claude Code never sees it as a slash command; `skills.hint`
+adds a line telling the job to run that skill with the Skill tool. Skills marked
+`disable-model-invocation` are left out, since the Skill tool can't run them.
+
 ## Why decisions can't be answered by accident
 
 A decision is a row in `state/threads.db`, answered only by his tap (`answer`) or by

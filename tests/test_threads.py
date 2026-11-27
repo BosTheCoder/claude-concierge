@@ -263,3 +263,14 @@ def test_the_list_marks_a_thread_working_only_while_its_pane_is_mid_turn(db, clo
     # R1's window is gone, so it is never captured (tmux would prefix-match it to R10);
     # the shared 13-edward pane is captured once.
     assert sorted(captured) == ["13-edward", "concierge:A1"]
+
+
+def test_a_slash_message_tells_the_job_to_run_that_skill(db, monkeypatch):
+    from concierge import skills
+    monkeypatch.setattr(skills, "available", lambda *_: [{"name": "ai-toolkit:research", "description": ""}])
+    th = threads.find_or_create(db, job="J1", title="Pizza", pane="s:J1")
+    typed = []
+    threads.say(db, th["id"], "/research best pizza near me", submitter=lambda pane, text: typed.append(text))
+    threads.say(db, th["id"], "just chatting", submitter=lambda pane, text: typed.append(text))
+    assert "ai-toolkit:research" in typed[0] and "Skill tool" in typed[0]
+    assert "Skill tool" not in typed[1]

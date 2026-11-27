@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from concierge import config, sessions, tmuxctl
+from concierge import config, sessions, skills, tmuxctl
 
 DB_FILE = config.REPO / "state" / "threads.db"
 LONDON = ZoneInfo("Europe/London")
@@ -320,7 +320,7 @@ def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None 
     if about is not None and park(db, about, "Asked about it"):
         tail = (f" (Decision {about} is off his list while you answer. If it still needs his call afterwards, "
                 f"bring it back with `concierge revise {about}`, with anything that changed.)")
-    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}{tail}"), submitter=submitter)
+    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}{tail}{skills.hint(text)}"), submitter=submitter)
     if problem and tail:
         _unpark(db, about)  # the job never heard, so nobody would bring it back
     db.execute("UPDATE messages SET state=?, error=? WHERE id=?",
