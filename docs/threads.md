@@ -18,6 +18,10 @@ concierge rules                     # his global rules + delegations in force
 concierge decided "<q>" "<choice>" --rule "<rule>"   # refused without a delegation
 ```
 
+`post` and `ask` take `--image <path>`, repeated per photo: each is pushed and linked, and the app
+draws any GitHub link to an image as a swipeable strip, full screen on tap. The repos are private,
+so `/api/img` serves the file from the configured repo's checkout (image files inside it only).
+
 A concierge job's thread comes from `CONCIERGE_JOB_ID`. Any other session sets
 `CONCIERGE_THREAD_JOB` and `CONCIERGE_THREAD_PANE` (its tmux target) and names its
 threads with `--thread`; see 13 Edward's `kelvin.sh`. `notify` still works and lands

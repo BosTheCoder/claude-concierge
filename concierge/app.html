@@ -122,6 +122,14 @@
   .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; } .thumbs:empty { display:none; }
   .thumbs span { position:relative; } .thumbs img { width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--line); display:block; }
   .thumbs button { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:0; background:var(--ink); color:var(--card); cursor:pointer; line-height:22px; padding:0; }
+  .gal { display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x mandatory; margin:8px 0; white-space:normal; scrollbar-width:none; }
+  .gal img { height:260px; max-width:85%; flex:none; object-fit:cover; scroll-snap-align:start; border-radius:8px; background:var(--line); cursor:zoom-in; }
+  .lightbox { position:fixed; inset:0; background:#000; z-index:20; }
+  .lightbox .track { display:flex; height:100%; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; }
+  .lightbox .track img { flex:none; width:100%; height:100%; object-fit:contain; scroll-snap-align:center; }
+  .lightbox .bar { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    background:linear-gradient(#000a, transparent); color:#fff; }
+  .lightbox .bar span { flex:1; } .lightbox .bar a { color:#fff; } .lightbox .bar button { color:#fff; font-size:22px; }
   textarea.capture { width:100%; min-height:40vh; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; }
 
   /* Desktop: use the width. Home: search and filters become a sticky left sidebar, threads a grid of cards.
@@ -152,7 +160,36 @@
 <script>
 const $ = (s, el=document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+// A linked photo reads as its file name: the photo itself is in the strip gal() draws under the text.
+const IMGURL = /^https:\/\/github\.com\/\S+\.(png|jpe?g|webp|gif)(\?raw=true)?$/i;
+const linkify = s => esc(s).replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${IMGURL.test(u) ? "📷 " + u.split("/").pop().split("?")[0] : u}</a>`);
+// Photos a job linked (GitHub links to images): a strip he swipes, tap for the full-screen gallery.
+// The repos are private, so they come from the checkout on this machine (/api/img).
+const imgSrc = u => "api/img?u=" + encodeURIComponent(u);
+function gal(...texts) {
+  const urls = [...new Set(texts.flatMap(t => String(t ?? "").match(/https?:\/\/[^\s<]+/g) || []).filter(u => IMGURL.test(u)))];
+  return urls.length ? `<div class="gal" data-urls="${esc(JSON.stringify(urls))}">${urls.map((u, i) =>
+    `<img loading="lazy" src="${imgSrc(u)}" data-gal="${i}" alt="Photo ${i + 1} of ${urls.length}">`).join("")}</div>` : "";
+}
+function lightbox(urls, at) {
+  const box = document.createElement("div"); box.className = "lightbox";
+  box.innerHTML = `<div class="bar"><span></span><a href="${esc(urls[at])}" target="_blank" rel="noopener">GitHub</a><button class="icon" aria-label="Close">✕</button></div>`;
+  const track = document.createElement("div"); track.className = "track";
+  track.innerHTML = urls.map((u, i) => `<img src="${imgSrc(u)}" alt="Photo ${i + 1} of ${urls.length}">`).join("");
+  box.prepend(track); document.body.append(box);
+  const n = () => { const i = Math.round(track.scrollLeft / track.clientWidth);
+    box.querySelector("span").textContent = `${i + 1} / ${urls.length}`; box.querySelector("a").href = urls[i]; };
+  track.scrollLeft = at * track.clientWidth; n(); track.onscroll = n;
+  const key = e => { if (e.key === "Escape") history.back();
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") track.scrollBy({left: (e.key === "ArrowRight" ? 1 : -1) * track.clientWidth, behavior: "smooth"}); };
+  // The phone's back button closes it rather than leaving the thread.
+  history.pushState({lightbox: 1}, "");
+  const shut = () => { box.remove(); removeEventListener("keydown", key); removeEventListener("popstate", shut); };
+  addEventListener("popstate", shut); addEventListener("keydown", key);
+  box.querySelector("button").onclick = () => history.back();
+}
+document.addEventListener("click", e => { const img = e.target.closest("[data-gal]");
+  if (img) lightbox(JSON.parse(img.parentElement.dataset.urls), +img.dataset.gal); });
 const LV = ["fyi","needs","urgent","critical"], LVNAME = {fyi:"FYI", needs:"Needs me", urgent:"Urgent", critical:"Critical"};
 const NEED = {decision:"Decision needed", reply:"Reply needed", nothing:"Nothing needed"};
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -235,12 +272,12 @@ async function thread(id, quiet) {
   const shown = new Set([...open, ...recent, ...mine, ...(latest ? [latest] : [])]);
   const past = ms.filter(m => !shown.has(m));
   const top = (t.job ? `<p class="muted">Claude chat: ${t.chat_url ? `<a href="${esc(t.chat_url)}" target="_blank" rel="noopener">${esc(t.job)} ↗</a>` : esc(t.job)}</p>` : "")
-    + (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}</div>` : "")
-    + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}</div>` : "");
+    + (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}${gal(t.summary)}</div>` : "")
+    + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}${gal(latest.text)}</div>` : "");
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${gal(m.text, m.context, m.why)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
@@ -383,7 +420,7 @@ async function sendCard(id, b) {
 function msg(m) {
   const who = {me:"You", job:"Claude", claude:"Claude (decided for you)", app:"Concierge"}[m.author] || m.author;
   const states = {sent:"✓ sent", picked:"✓✓ picked up", acted:"✓✓ acted on", failed:"⚠ not delivered: " + (m.error || "")};
-  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${m.kind === "chat" && m.body && m.answer ? `<div class="em mine" style="margin-top:6px">${linkify(m.body)}</div>` : ""}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
+  return `<div class="msg ${m.author}">${m.author !== "me" ? `<div class="who"><span class="dot ${m.urgency}"></span>${who} · ${age(m.created)}</div>` : ""}${linkify(m.text)}${gal(m.text, m.context)}${m.kind === "chat" && m.body && m.answer ? `<div class="em mine" style="margin-top:6px">${linkify(m.body)}</div>` : ""}${opts(m)}${m.author === "me" && m.state ? `<div class="state ${m.state}">${esc(states[m.state] || m.state)}</div>` : ""}</div>`;
 }
 async function act(action, body) {
   try { await api(`threads/${current.id}/${action}`, body); lastSig = ""; thread(current.id); }

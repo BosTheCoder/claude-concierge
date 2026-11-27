@@ -652,18 +652,28 @@ def _open_thread(db, thread: str | None):
     return threads.find_or_create(db, job=t["job"], title=t["title"], pane=t["pane"], thread_id=t["thread_id"])
 
 
+IMAGE_HELP = "A photo to show him, repeat for each: pushed, then a swipeable strip in the app (one per photo, not a contact sheet)"
+
+
+def _images(paths: list[str] | None) -> str:
+    """Each photo pushed and linked, one per line: the app turns these links into a gallery."""
+    return "".join("\n" + publish_and_link(p) for p in paths or [])
+
+
 @app.command("post")
 def post_cmd(
     text: str,
     thread: str = typer.Option(None, help="Thread id, or a title (a new title starts a thread)"),
     urgency: str = typer.Option("needs", help="fyi | needs | urgent | critical"),
     file: str = typer.Option(None, help="A file to push and link, relative to your cwd"),
+    image: list[str] = typer.Option(None, "--image", help=IMAGE_HELP),
 ):
     """Say something in your thread in his app."""
     from concierge import threads
 
     if file:
         text += "\n" + publish_and_link(file)
+    text += _images(image)
     with threads.connect() as db:
         th = _open_thread(db, thread)
         threads.post(db, th, text, urgency=urgency)
@@ -681,6 +691,7 @@ def ask_cmd(
     thread: str = typer.Option(None),
     urgency: str = typer.Option("needs"),
     replaces: list[int] = typer.Option(None, "--replaces", help="Decision id(s) this one overtakes: withdrawn"),
+    image: list[str] = typer.Option(None, "--image", help=IMAGE_HELP),
 ):
     """A decision for him: buttons in the app. His tap comes back to you as a message.
     Check `concierge decisions` first: if one already open covers this, `concierge revise` it instead."""
@@ -688,6 +699,7 @@ def ask_cmd(
 
     if recommend and not (why or "").strip():
         raise typer.BadParameter("say why you'd pick it: --why")
+    context += _images(image)
     with threads.connect() as db:
         th = _open_thread(db, thread)
         mid = threads.post(db, th, question, urgency=urgency, options=option, recommend=recommend,

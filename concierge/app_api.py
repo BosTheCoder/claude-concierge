@@ -12,6 +12,7 @@ import binascii
 import json
 import re
 import threading
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +24,8 @@ UPLOADS = Path.home() / ".local" / "share" / "concierge" / "uploads"
 MAX_IMAGES = 10
 MAX_START_BODY = 40 * 1024**2  # the dashboard's cap on a New thread POST: 10 phone photos, downscaled, as base64
 IMAGE_MAGIC = {b"\xff\xd8\xff": ".jpg", b"\x89PNG": ".png", b"RIFF": ".webp", b"GIF8": ".gif"}
+IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
+BLOB = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/blob/[^/]+/(.+)$")
 LIMITS = {"text": 8000, "spec": 4000, "rules": 8000, "note": 2000, "to": 2000, "cc": 2000, "subject": 1000}
 
 
@@ -44,6 +47,21 @@ def manifest(prefix: str = "") -> str:
         "share_target": {"action": f"{prefix}/app", "method": "GET",
                          "params": {"title": "title", "text": "text", "url": "url"}},
     })
+
+
+def image(url: str, repos=None) -> tuple[int, bytes, str]:
+    """An image a job linked, from the repo's checkout here: the repos are private, so the phone can't
+    load the GitHub link itself. Only image files inside a configured repo, nothing else on disk."""
+    m = BLOB.match(url.split("?")[0])
+    repo = m and next((r for r in (config.REPOS if repos is None else repos)
+                       if (r.github or "").lower() == f"https://github.com/{m.group(1)}".lower()), None)
+    if not repo:
+        return 404, b"not a linked image", "text/plain"
+    root = repo.path.expanduser().resolve()
+    f = (root / urllib.parse.unquote(m.group(2))).resolve()
+    if not f.is_relative_to(root) or f.suffix.lower() not in IMAGE_TYPES or not f.is_file():
+        return 404, b"no such image", "text/plain"
+    return 200, f.read_bytes(), IMAGE_TYPES[f.suffix.lower()]
 
 
 def brief() -> dict | None:

@@ -26,3 +26,20 @@ def test_non_images_are_refused_and_nothing_is_written(tmp_path):
     with pytest.raises(ValueError):
         app_api.save_images(["data:text/html;base64," + base64.b64encode(b"<script>").decode()], root=tmp_path)
     assert not any(tmp_path.iterdir())
+
+
+def test_linked_photos_are_served_from_the_checkout_and_nothing_else_is(tmp_path):
+    from concierge.settings import Repo
+
+    repo = tmp_path / "tasks"
+    (repo / "job").mkdir(parents=True)
+    (repo / "job" / "a b.png").write_bytes(PNG)
+    (repo / "job" / "notes.md").write_text("private")
+    (tmp_path / "outside.png").write_bytes(PNG)
+    repos = [Repo(name="tasks", path=repo, github="https://github.com/Me/tasks")]
+    url = "https://github.com/me/tasks/blob/main/job/"
+
+    assert app_api.image(url + "a%20b.png", repos) == (200, PNG, "image/png")
+    assert app_api.image(url + "notes.md", repos)[0] == 404
+    assert app_api.image(url + "../../outside.png", repos)[0] == 404
+    assert app_api.image("https://github.com/someone/else/blob/main/job/a%20b.png", repos)[0] == 404

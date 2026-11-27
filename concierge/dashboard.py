@@ -399,7 +399,7 @@ def handler_for(sampler: Sampler):
             """Silence. This runs in a tmux window nobody watches, and one line
             per poll every five seconds forever is not a log, it is a leak."""
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(self, status: int, body: bytes, content_type: str, cache: str = "no-store") -> None:
             # The tasks list is ~900 KB of JSON and ~240 KB gzipped: on a phone that's the wait.
             zipped = len(body) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or "")
             if zipped:
@@ -410,7 +410,7 @@ def handler_for(sampler: Sampler):
                 self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache)
             self.end_headers()
             self.wfile.write(body)
 
@@ -493,6 +493,10 @@ def handler_for(sampler: Sampler):
                 host = self.headers.get("Host") or ""
                 prefix = "" if ":" in host or host.startswith("127.") else CLAUDE_PREFIX
                 self._send(200, app_api.manifest(prefix).encode(), "application/manifest+json")
+                return
+            if route == "/api/img":  # a thread's photos: cached, so each poll's re-render doesn't refetch them
+                u = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("u") or [""])[0]
+                self._send(*app_api.image(u), cache="private, max-age=86400")
                 return
             if route.startswith(("/api/threads", "/api/alarms/", "/api/settings", "/api/inbox/")):
                 self._json(*app_api.get(route, urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)))

@@ -105,6 +105,11 @@ able to look at goes through `--file`, or through:
 which pushes that file and prints its URL, for when you need the link inside
 the text of a message rather than appended to it.
 
+**Photos he should see** (profiles, listings, screenshots, options to pick
+from) go on `post` or `ask` as `--image <path>`, repeated once per photo: the
+app shows them as a strip he swipes, and tap opens them full screen. Send the
+separate photos, not a contact sheet stitched into one image.
+
 A link carries the *detail*, not the answer. If he has to act on something, the
 thing to act on goes in the message; the link is for everything behind it.
 Never reply with a bare URL and nothing else.
