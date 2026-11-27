@@ -240,7 +240,7 @@ async function thread(id, quiet) {
   const other = rows(t.other_facts);
   $("#main").innerHTML = `
     ${top}
-    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button></div></div>`).join("")}
+    ${open.map(m => m.kind === "draft" ? mailCard(m) : m.kind === "chat" ? chatCard(m) : `<div class="ask"><div class="who"><span class="dot ${m.urgency}"></span> ${m.kind === "close?" ? "Concierge" : "Decision for you"} · ${age(m.created)}${m.revised ? ` · updated ${age(m.revised)}` : ""}</div>${linkify(m.text)}${fold(m, "context", "Context")}${m.recommend ? fold(m, "why", `Why Claude picks “${esc(m.recommend)}”`) : ""}${opts(m)}<div class="askrow">${m.context || m.kind === "close?" ? "" : `<button class="btn ghost" data-explain="${m.id}">Explain</button>`}<button class="btn ghost" data-about="${m.id}">Ask about this</button>${m.kind === "close?" ? "" : `<button class="btn ghost" data-aside="${m.id}">Not now</button>`}</div></div>`).join("")}
     ${recent.map(msg).join("")}
     ${Object.keys(t.facts || {}).length ? `<div class="facts">${rows(t.facts)}</div>` : ""}
     ${mine.map(msg).join("")}
@@ -264,6 +264,8 @@ async function thread(id, quiet) {
   $("#deleg").onclick = () => delegForm(t);
   $("#main").querySelectorAll("[data-choice]").forEach(b => b.onclick = () => choose(+b.dataset.msg, b.dataset.choice));
   $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(+b.dataset.undo));
+  $("#main").querySelectorAll("[data-aside]").forEach(b => b.onclick = () => decisionAct("setaside", +b.dataset.aside, "Set aside: Claude carries on without it"));
+  $("#main").querySelectorAll("[data-back]").forEach(b => b.onclick = () => decisionAct("bringback", +b.dataset.back, "Back on your list"));
   $("#main").querySelectorAll("[data-mail]").forEach(card => { const e = mails[card.dataset.mail].e;
     card.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => e[el.dataset.f] = el.dataset.f === "html" ? el.innerHTML : el.value); });
   $("#main").querySelectorAll("[data-mail]").forEach(card => { const s = mails[card.dataset.mail];
@@ -292,6 +294,7 @@ function opts(m) {
   if (m.answer !== null && m.answer !== undefined)
     return m.kind === "draft" || m.kind === "chat" ? `<div class="answered${m.answered_by === "withdrawn" ? " withdrawn" : ""}">${esc(m.answer)}</div>`
       : m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
+      : m.answered_by === "parked" ? `<div class="answered withdrawn">${m.answer === "Set aside" ? "Set aside: Claude carries on without it" : "Off your list while Claude answers"}${m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-back="${m.id}">Bring back</button></div>`
       : m.answered_by === "claude"
       ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
       : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "offline" ? " · waiting for signal" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-undo="${m.id}">Undo</button></div>`;
@@ -404,6 +407,13 @@ async function send(canned, about) {
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
   $("#send").disabled = false;
+}
+// Not now / Bring back: the decision leaves his list or comes back, and the job is told either way.
+async function decisionAct(action, id, done) {
+  try { const r = await api(`threads/${current.id}/${action}`, {msg:id}, `${done} in “${current.title}”`);
+    toast(r.queued ? "No signal: it goes when you're back online" : done);
+    setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
+  catch (e) { toast(e.message); }
 }
 async function choose(id, choice) {
   try { const r = await api(`threads/${current.id}/answer`, {msg:id, choice}, `Answer “${choice}” in “${current.title}”`);

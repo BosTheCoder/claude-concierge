@@ -315,17 +315,25 @@ def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None 
     shown = f"Re: “{d['text'][:60]}…”\n{text}" if about is not None else text
     mid = post(db, thread, shown, author=author)
     db.execute("UPDATE messages SET state='sent' WHERE id=?", (mid,))
-    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}"), submitter=submitter)
+    # Asking about a decision takes it off his list while the job answers, so it doesn't sit there stale.
+    tail = ""
+    if about is not None and park(db, about, "Asked about it"):
+        tail = (f" (Decision {about} is off his list while you answer. If it still needs his call afterwards, "
+                f"bring it back with `concierge revise {about}`, with anything that changed.)")
+    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}{tail}"), submitter=submitter)
+    if problem and tail:
+        _unpark(db, about)  # the job never heard, so nobody would bring it back
     db.execute("UPDATE messages SET state=?, error=? WHERE id=?",
                ("failed" if problem else "picked", problem, mid))
     return mid
 
 
-def _decision(db, msg_id: int) -> tuple[sqlite3.Row, sqlite3.Row]:
+def _decision(db, msg_id: int, *, parked: bool = False) -> tuple[sqlite3.Row, sqlite3.Row]:
+    """The open decision, its thread. `parked`: one set aside also counts as open."""
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
     if not msg or not msg["options"]:
         raise KeyError(f"message {msg_id} is not a decision")
-    if msg["answer"] is not None:
+    if msg["answer"] is not None and not (parked and msg["answered_by"] == "parked"):
         raise ValueError(f"already answered: {msg['answer']}")
     return msg, db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
 
@@ -374,10 +382,52 @@ def card_sent(db, msg_id: int, *, answer: str, told: str, submitter=None) -> str
     return problem
 
 
+def park(db, msg_id: int, why: str) -> bool:
+    """Off his list without an answer: he asked about it, or set it aside. It comes back when the job
+    revises it or he taps Bring back. Email and chat cards stay: the job replaces those itself."""
+    msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    if not msg or not msg["options"] or msg["answer"] is not None or msg["kind"] in (*CARDS, "close?"):
+        return False
+    db.execute("UPDATE messages SET answer=?, answered_by='parked', answered_at=?, state=NULL, error=NULL WHERE id=?",
+               (why, _iso(now()), msg_id))
+    return True
+
+
+def set_aside(db, msg_id: int, *, submitter=None) -> str | None:
+    """His Not now: the decision leaves his list and the job is told to carry on without it,
+    bringing it back only if it can't. Returns why it didn't reach the job, or None."""
+    msg, thread = _decision(db, msg_id)
+    if not park(db, msg_id, "Set aside"):
+        raise ValueError("only a plain decision can be set aside")
+    body = (f'Kelvin set aside decision {msg_id} ("{msg["text"]}") without choosing: it is off his list. '
+            "Carry on with whatever doesn't hang on it. If you can't move without his call, bring it back "
+            f"with `concierge revise {msg_id}` once something changes (new facts, a deadline getting close), "
+            "saying what changed in --context. If it no longer matters, leave it.")
+    problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+    db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else None, problem, msg_id))
+    return problem
+
+
+def bring_back(db, msg_id: int, *, submitter=None) -> str | None:
+    """He puts a set-aside decision back on his list himself. The job hears, so it doesn't re-ask it."""
+    msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    if not msg or msg["answered_by"] != "parked":
+        raise ValueError("only a set-aside decision can be brought back")
+    _unpark(db, msg_id)
+    thread = db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
+    body = f'Kelvin put decision {msg_id} ("{msg["text"]}") back on his list. It is open again: don\'t re-ask it.'
+    return _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+
+
+def _unpark(db, msg_id: int) -> None:
+    db.execute("UPDATE messages SET answer=NULL, answered_by=NULL, answered_at=NULL, state=NULL, error=NULL "
+               "WHERE id=? AND answered_by='parked'", (msg_id,))
+
+
 def withdraw(db, msg_id: int, why: str) -> None:
     """The job takes back a decision it no longer needs: overtaken by a newer one, or by events.
     It leaves his list; the history keeps it, with why."""
-    _decision(db, msg_id)
+    _decision(db, msg_id, parked=True)
     db.execute("UPDATE messages SET answer=?, answered_by='withdrawn', answered_at=? WHERE id=?",
                (why.strip() or "no longer needed", _iso(now()), msg_id))
 
@@ -385,8 +435,9 @@ def withdraw(db, msg_id: int, why: str) -> None:
 def revise(db, msg_id: int, *, text: str | None = None, options: list[str] | None = None,
            recommend: str | None = None, context: str | None = None, why: str | None = None) -> None:
     """The job updates an open decision in place (new facts, a changed option) instead of
-    asking a second one. A tap on an option that has since gone is refused by answer()."""
-    msg, _ = _decision(db, msg_id)
+    asking a second one. A tap on an option that has since gone is refused by answer().
+    Revising a set-aside decision brings it back onto his list, with an alert."""
+    msg, thread = _decision(db, msg_id, parked=True)
     opts = options or json.loads(msg["options"])
     rec = recommend if recommend is not None else msg["recommend"]
     if rec and rec not in opts:
@@ -395,6 +446,14 @@ def revise(db, msg_id: int, *, text: str | None = None, options: list[str] | Non
                (text or msg["text"], json.dumps(opts), rec or None, context if context is not None else msg["context"],
                 why if why is not None else msg["why"], _iso(now()), msg_id))
     db.execute("UPDATE threads SET updated=? WHERE id=?", (_iso(now()), msg["thread"]))
+    if msg["answered_by"] == "parked":
+        _unpark(db, msg_id)
+        _alert(db, thread, msg_id, msg["urgency"], text or msg["text"])
+
+
+def parked_decisions(db, thread_id: int) -> list[sqlite3.Row]:
+    return db.execute("SELECT * FROM messages WHERE thread=? AND answered_by='parked' ORDER BY id",
+                      (thread_id,)).fetchall()
 
 
 def open_decisions(db, thread_id: int) -> list[sqlite3.Row]:

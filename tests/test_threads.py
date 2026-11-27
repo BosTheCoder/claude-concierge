@@ -169,6 +169,35 @@ def test_an_overtaken_decision_leaves_his_list_and_a_question_names_the_decision
     assert f"decision {second}" in typed[0] and "Monday" in typed[0]
 
 
+def test_asking_about_or_setting_aside_a_decision_takes_it_off_his_list_until_it_is_brought_back(db, clock, monkeypatch):
+    th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
+    mid = threads.post(db, th, "Ask Benson for Sunday?", options=["Yes", "Wait"], urgency="needs",
+                       sender=lambda *_: None)
+    typed = []
+    threads.say(db, th["id"], "Why Sunday?", about=mid, submitter=lambda pane, text: typed.append(text) or None)
+    assert threads.open_decisions(db, th["id"]) == [] and threads.detail(db, th["id"])["needs"] != "decision"
+    assert f"revise {mid}" in typed[-1]  # the job knows how to bring it back
+    with pytest.raises(ValueError):
+        threads.answer(db, mid, "Yes")  # a parked decision isn't answerable until it's back
+    alarms, sender = sent_alarms()
+    monkeypatch.setattr(threads, "_post_ntfy", sender)
+    clock["now"] += timedelta(hours=1)
+    threads.revise(db, mid, context="RN is free Sun 1-2pm")  # the job brings it back, and he hears
+    assert [r["id"] for r in threads.open_decisions(db, th["id"])] == [mid] and alarms
+
+    threads.set_aside(db, mid, submitter=lambda pane, text: typed.append(text) or None)  # his Not now
+    assert threads.open_decisions(db, th["id"]) == [] and "set aside" in typed[-1]
+    threads.bring_back(db, mid, submitter=lambda pane, text: typed.append(text) or None)  # he changes his mind
+    assert [r["id"] for r in threads.open_decisions(db, th["id"])] == [mid]
+
+    # If the question never reached the job, nobody would bring the decision back: it stays on his list.
+    threads.say(db, th["id"], "Why?", about=mid, submitter=lambda pane, text: "pane gone")
+    assert [r["id"] for r in threads.open_decisions(db, th["id"])] == [mid]
+    threads.set_aside(db, mid, submitter=lambda *_: None)
+    threads.withdraw(db, mid, "Benson moved out")  # a parked decision can still be withdrawn
+    assert threads.detail(db, th["id"])["messages"][0]["answered_by"] == "withdrawn"
+
+
 def test_a_decision_is_revised_in_place_and_a_tap_on_a_dropped_option_is_refused(db, clock):
     th = threads.find_or_create(db, job="A1", title="Damp", pane="concierge:A1")
     mid = threads.post(db, th, "Ask Benson for Sunday?", options=["Sunday", "Wait"], recommend="Sunday",

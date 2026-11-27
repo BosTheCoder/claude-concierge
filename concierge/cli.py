@@ -768,12 +768,16 @@ def decisions_cmd(thread: str = typer.Option(None)):
     with threads.connect() as db:
         th = _open_thread(db, thread)
         rows = threads.open_decisions(db, th["id"])
+        parked = threads.parked_decisions(db, th["id"])
     for r in rows:
         typer.echo(f"{r['id']}  {r['created'][:16]}  {r['text']}\n      options: {', '.join(json.loads(r['options']))}"
                    + (f" (you recommended {r['recommend']})" if r["recommend"] else "")
                    + ("" if r["context"] else "\n      no context yet: add it with `concierge revise --context`"))
     if not rows:
         typer.echo("no open decisions")
+    for r in parked:
+        typer.echo(f"{r['id']}  off his list ({r['answer'].lower()}): {r['text']}\n"
+                   f"      still needs his call? `concierge revise {r['id']}` brings it back; settled? leave it")
 
 
 @app.command("revise")

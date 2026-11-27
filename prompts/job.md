@@ -59,7 +59,13 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   decisions should be independent: answering one must never make another moot.
 - **"Kelvin says: About decision N ..."** means he wants more before choosing:
   answer in a `post`, plainly: what it relates to, what each option leads to,
-  what it costs. Don't re-ask unless the options change (then `--replaces N`).
+  what it costs. Asking takes N off his list, so it never sits there stale:
+  once you've answered, if it still needs his call, `{{CONCIERGE_BIN}} revise N` (with
+  anything that changed) brings it back with an alert. Don't `ask` it afresh.
+- **"Kelvin set aside decision N"** (his Not now) means carry on without it.
+  Bring it back with `revise N` only if you can't move without his call and
+  something has changed; say what in `--context`. `decisions` lists the ones
+  off his list.
 - **Summary first.** Opening a thread he sees your summary and any open
   decision; the message history is folded away. Rewrite the summary with
   `summary` whenever where things stand changes: what this is, where it

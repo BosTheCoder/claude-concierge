@@ -45,6 +45,16 @@ An answer tapped with no signal sits in sw.js's outbox: Undo (or Take back on th
 outbox pill) deletes it there, so it never leaves the phone. Undo on a "Close it?"
 answer reopens the question, and the thread if it closed it.
 
+## Off his list: asked about, or Not now
+
+A decision he asks about (Ask about this, Explain) leaves his list while the job
+answers, so it doesn't sit there stale; the job is told to `revise N` if it still
+needs his call, which puts it back with an alert. Not now sets it aside the same way
+and tells the job to carry on without it. Either way the row is `answered_by='parked'`,
+not answerable until it's back; Bring back in the app reopens it and tells the job.
+Email and chat cards and "Close it?" never park. If the question never reached the
+job, the decision stays on his list.
+
 ## Alerts
 
 `raise_alarm` stores the alarm and posts its URL (`/api/alarms/<id>`) to ntfy.sh on

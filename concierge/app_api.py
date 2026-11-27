@@ -258,6 +258,12 @@ def post(path: str, body: dict, *, lock=None, finish=None) -> tuple[int, dict]:
             _bg(threads.card_sent, msg["id"], answer=answer, told=told)
         elif action == "undo":
             _bg(threads.undo, int(body["msg"]))
+        elif action == "setaside":
+            msg = int(body["msg"])
+            threads._decision(db, msg)  # refuse now (400) rather than on the worker
+            _bg(threads.set_aside, msg)
+        elif action == "bringback":
+            _bg(threads.bring_back, int(body["msg"]))
         elif action == "close":
             threads.close(db, tid)
         elif action == "reopen":
