@@ -33,7 +33,13 @@
     border-radius:10px; padding:10px 12px; margin:8px 0; text-decoration:none; color:inherit; }
   .row.needs { border-left-color:var(--blue); } .row.urgent { border-left-color:var(--amber); } .row.critical { border-left-color:var(--red); }
   .row .t { font-weight:600; display:flex; gap:8px; align-items:baseline; }
-  .row .t span:first-child { flex:1; }
+  .row .t span:first-of-type { flex:1; }
+  .row.working { border-left-color:var(--green); animation:breathe 1.6s ease-in-out infinite; }
+  .row .live { width:8px; height:8px; border-radius:50%; background:var(--green); flex:none; align-self:center; animation:pulse 1.2s ease-in-out infinite; }
+  .need .working { color:var(--green); }
+  @keyframes pulse { 50% { opacity:.25; transform:scale(.7); } }
+  @keyframes breathe { 50% { border-left-color:#1d5a2a; } }
+  @media (prefers-reduced-motion: reduce) { .row.working, .row .live { animation:none; } }
   .row .need { font-size:13px; font-weight:600; margin-top:2px; }
   .need.decision { color:var(--amber); } .need.reply { color:var(--blue); } .need.nothing { color:var(--dim); font-weight:400; }
   .row .last { color:var(--dim); font-size:14px; margin-top:3px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -179,9 +185,9 @@ async function home(quiet) {
     <div class="chips">${chips("need", ["all","decision","reply","nothing"], {decision:"Decision", reply:"Reply", nothing:"FYI"})}</div>
     <div class="chips">${chips("urg", ["all","critical","urgent","needs","fyi"], LVNAME)}</div></div>
     <div class="list">${d.brief && !homeQ && !showClosed ? `<a class="brief" href="${esc(d.brief.url)}"><b>Morning Brief</b> · ${esc(d.brief.date || "")}${d.brief.red ? ` · ${d.brief.red} red` : ""}<br><span class="muted">${esc(d.brief.headline)}</span></a>` : ""}
-    ${rows.map(t => `<a class="row ${t.urgency}" href="#t=${t.id}">
-        <div class="t"><span>${esc(t.title)}</span><span class="age">${age(t.updated)}</span></div>
-        <div class="need ${t.needs}">${t.status === "closed" ? "Closed" : NEED[t.needs]}${t.urgency !== "fyi" && t.needs !== "nothing" ? " · " + LVNAME[t.urgency] : ""}${t.floor ? " · turned down" : ""}</div>
+    ${rows.map(t => `<a class="row ${t.urgency}${t.working ? " working" : ""}" href="#t=${t.id}">
+        <div class="t">${t.working ? `<i class="live" title="Claude is working on this"></i>` : ""}<span>${esc(t.title)}</span><span class="age">${age(t.updated)}</span></div>
+        <div class="need ${t.needs}">${t.working ? `<span class="working">Working</span> · ` : ""}${t.status === "closed" ? "Closed" : NEED[t.needs]}${t.urgency !== "fyi" && t.needs !== "nothing" ? " · " + LVNAME[t.urgency] : ""}${t.floor ? " · turned down" : ""}</div>
         <div class="last">${t.last_author === "me" ? "You: " : ""}${esc(t.last)}</div></a>`).join("") || `<p class="muted">Nothing here.</p>`}</div>
     <p><button class="btn ghost" id="closed">${showClosed ? "Open threads" : "Closed threads"}</button></p>
     <button class="fab" id="fab" title="New thread">+</button>`;

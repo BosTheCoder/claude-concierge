@@ -71,7 +71,8 @@ def get(path: str, query: dict) -> tuple[int, dict]:
     try:
         if path == "/api/threads":
             q = (query.get("q") or [""])[0][:200]
-            return 200, {"threads": threads.home(db, q=q, closed=bool(query.get("closed"))), "brief": brief(),
+            return 200, {"threads": threads.mark_working(threads.home(db, q=q, closed=bool(query.get("closed")))),
+                         "brief": brief(),
                          "mode": (m := threads.active_mode(db)) and m["name"]}
         if (m := ROUTE.match(path)) and m.group(2) in ("draft", "chat"):
             msg = db.execute("SELECT ref, body FROM messages WHERE id=? AND thread=? AND kind=?",

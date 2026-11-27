@@ -221,3 +221,16 @@ def test_undoing_close_reopens_the_thread_and_the_question(db, clock):
     threads.undo(db, mid, submitter=lambda *_: pytest.fail("nothing goes to the job"))
     assert threads.detail(db, th["id"])["status"] == "open"
     assert db.execute("SELECT answer FROM messages WHERE id=?", (mid,)).fetchone()[0] is None
+
+
+def test_the_list_marks_a_thread_working_only_while_its_pane_is_mid_turn(db, clock):
+    rows = [{"pane": "concierge:A1"}, {"pane": "13-edward"}, {"pane": "13-edward"},
+            {"pane": "concierge:R1"}, {"pane": None}]
+    states = {"concierge:A1": "busy", "13-edward": "idle", "concierge:R1": "busy"}
+    captured = []
+    read = lambda pane: captured.append(pane) or states[pane]
+    out = threads.mark_working(rows, live_panes={"concierge:A1", "13-edward"}, read=read)
+    assert [t["working"] for t in out] == [True, False, False, False, False]
+    # R1's window is gone, so it is never captured (tmux would prefix-match it to R10);
+    # the shared 13-edward pane is captured once.
+    assert sorted(captured) == ["13-edward", "concierge:A1"]

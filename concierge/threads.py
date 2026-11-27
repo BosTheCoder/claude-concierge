@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from concierge import config, tmuxctl
+from concierge import config, sessions, tmuxctl
 
 DB_FILE = config.REPO / "state" / "threads.db"
 LONDON = ZoneInfo("Europe/London")
@@ -503,7 +503,7 @@ def summary(db, row: sqlite3.Row) -> dict:
                       (row["id"],)).fetchone()
     return {"id": row["id"], "title": row["title"], "status": row["status"], "needs": needs,
             "urgency": urgency, "floor": row["floor"], "updated": row["updated"], "job": row["job"],
-            "last": (last["text"][:160] if last else ""), "last_author": last["author"] if last else None}
+            "pane": row["pane"], "last": (last["text"][:160] if last else ""), "last_author": last["author"] if last else None}
 
 
 ORDER = {"decision": 0, "reply": 1, "nothing": 2}
@@ -524,6 +524,26 @@ def home(db, *, q: str = "", closed: bool = False) -> list[dict]:
         out.sort(key=lambda s: s["updated"], reverse=True)
         out.sort(key=lambda s: (ORDER[s["needs"]], -LEVELS.index(s["urgency"])))
     return out
+
+
+def mark_working(rows: list[dict], *, live_panes=None, read=None) -> list[dict]:
+    """Set `working` on each thread whose Claude is mid-turn, so the list can show it.
+
+    The pane says so itself ("esc to interrupt", or a live turn timer; see
+    sessions.pane_read). One `tmux list-panes` first, so a pane that is gone is
+    never captured (tmux would prefix-match R1 to R10), then one capture per
+    distinct pane: threads that share a session share its answer.
+    """
+    if live_panes is None:
+        live_panes = {x for p in sessions.panes() for x in (p.session, f"{p.session}:{p.window_name}")}
+    read = read or sessions.pane_state
+    busy: dict[str, bool] = {}
+    for t in rows:
+        pane = t.get("pane")
+        if pane in live_panes and pane not in busy:
+            busy[pane] = read(pane) == "busy"
+        t["working"] = busy.get(pane, False)
+    return rows
 
 
 def detail(db, thread_id: int) -> dict:
