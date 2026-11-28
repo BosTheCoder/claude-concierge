@@ -567,7 +567,8 @@ def handler_for(sampler: Sampler):
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:
                     length = -1
-                cap = app_api.MAX_START_BODY if self._route() == "/api/threads" else MAX_BODY  # New thread carries images
+                files = self._route() == "/api/threads" or self._route().endswith("/say")  # these carry attachments
+                cap = app_api.MAX_UPLOAD_BODY if files else MAX_BODY
                 if not 0 <= length <= cap:
                     self._json(400, {"ok": False, "error": "bad body length"})
                     return

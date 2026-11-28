@@ -1,31 +1,41 @@
 import base64
 
-import pytest
-
 from concierge import app_api, threads
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 20
+PDF = b"%PDF-1.4 not an image"
 
 
-def test_new_thread_with_images_saves_them_and_names_them_in_the_brief(tmp_path, monkeypatch):
-    monkeypatch.setattr(app_api, "UPLOADS", tmp_path / "uploads")
+def _url(raw: bytes, mime="application/pdf") -> str:
+    return f"data:{mime};base64," + base64.b64encode(raw).decode()
+
+
+def test_new_thread_with_a_file_saves_it_and_names_it_in_the_brief(tmp_path):
     briefs = []
 
     def spawner(**kw):
         briefs.append(kw["brief"])
         return {"id": "Z9"}
 
-    paths = app_api.save_images(["data:image/png;base64," + base64.b64encode(PNG).decode()])
-    db = threads.connect()
-    app_api.start_thread(db, "what is this", images=paths, spawner=spawner)
-    assert paths[0].read_bytes() == PNG and paths[0].suffix == ".png"
+    paths = app_api.save_files([{"name": "lease.pdf", "data": _url(PDF)}], root=tmp_path)
+    app_api.start_thread(threads.connect(), "what is this", files=paths, spawner=spawner)
+    assert paths[0].read_bytes() == PDF and paths[0].name.endswith("lease.pdf")
     assert str(paths[0]) in briefs[0]
 
 
-def test_non_images_are_refused_and_nothing_is_written(tmp_path):
-    with pytest.raises(ValueError):
-        app_api.save_images(["data:text/html;base64," + base64.b64encode(b"<script>").decode()], root=tmp_path)
-    assert not any(tmp_path.iterdir())
+def test_a_reply_with_files_tells_the_job_where_they_are(tmp_path):
+    db = threads.connect()
+    th = threads.find_or_create(db, job="A1", title="Plumber", pane="concierge:A1")
+    paths = app_api.save_files([{"name": "quote.pdf", "data": _url(PDF)}], root=tmp_path)
+    typed = []
+    mid = threads.say(db, th["id"], "this one?", files=paths, submitter=lambda pane, text: typed.append(text))
+    assert str(paths[0]) in typed[0]
+    assert "quote.pdf" in db.execute("SELECT text FROM messages WHERE id=?", (mid,)).fetchone()["text"]
+
+
+def test_a_file_name_cannot_leave_the_upload_folder(tmp_path):
+    [p] = app_api.save_files([{"name": "../../.bashrc", "data": _url(b"x")}], root=tmp_path / "up")
+    assert p.parent.parent == tmp_path / "up" and not p.name.startswith(".")
 
 
 def test_linked_photos_are_served_from_the_checkout_and_nothing_else_is(tmp_path):

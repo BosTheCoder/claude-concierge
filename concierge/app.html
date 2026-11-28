@@ -128,6 +128,9 @@
   .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:90px; background:#30363d; padding:8px 14px; border-radius:8px; font-size:14px; z-index:9; }
   .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; } .thumbs:empty { display:none; }
   .thumbs span { position:relative; } .thumbs img { width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--line); display:block; }
+  .thumbs i { width:72px; height:72px; border-radius:8px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center;
+    font-style:normal; font-size:11px; padding:4px; text-align:center; overflow:hidden; overflow-wrap:anywhere; background:var(--card); }
+  .composer .thumbs { flex-basis:100%; margin:0 0 4px; } .composer .clip { align-self:center; cursor:pointer; font-size:20px; padding:0 2px; }
   .thumbs button { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:0; background:var(--ink); color:var(--card); cursor:pointer; line-height:22px; padding:0; }
   .gal { display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x mandatory; margin:8px 0; white-space:normal; scrollbar-width:none; }
   .gal img { height:260px; max-width:85%; flex:none; object-fit:cover; scroll-snap-align:start; border-radius:8px; background:var(--line); cursor:zoom-in; }
@@ -404,8 +407,8 @@ async function thread(id, quiet) {
   if ($("#hist")) $("#hist").ontoggle = e => histOpen = e.target.open;
   $("#main").querySelectorAll("details.why").forEach(d => d.ontoggle = () => d.open ? folds.add(d.dataset.k) : folds.delete(d.dataset.k));
   if (!$(".composer")) { document.body.insertAdjacentHTML("beforeend",
-    `<div class="composer"><textarea id="say" rows="1" placeholder="Message, or / for a skill"></textarea><button class="btn" id="send">Send</button></div>`);
-    slashMenu($("#say")); }
+    `<div class="composer"><div class="thumbs" id="saythumbs"></div><label class="clip" aria-label="Attach files">📎<input type="file" id="saypick" multiple hidden></label><textarea id="say" rows="1" placeholder="Message, or / for a skill"></textarea><button class="btn" id="send">Send</button></div>`);
+    slashMenu($("#say")); sayFiles = attacher($("#say"), document.body, $("#saythumbs"), $("#saypick")); }
   $("#say").value = draft;
   $("#send").onclick = () => send(); $("#say").oninput = e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; };
   $("#floor").onclick = () => act("floor", {floor: t.floor ? null : "fyi"});
@@ -548,12 +551,14 @@ function aboutBar() {
   $(".composer").insertAdjacentHTML("afterbegin", `<div class="about"><span>About: ${esc(d.text)}</span><button class="icon" id="aboutx">✕</button></div>`);
   $("#aboutx").onclick = () => { aboutId = null; aboutBar(); };
 }
+let sayFiles;  // the reply box's attachments (attacher)
 async function send(canned, about) {
-  const text = canned || $("#say").value.trim(); if (!text) return;
+  const text = canned || $("#say").value.trim(), files = canned ? [] : sayFiles.list(); if (!text && !files.length) return;
   const re = canned ? about : aboutId;
   $("#send").disabled = true;
-  try { const r = await api(`threads/${current.id}/say`, {text, ...(re && {about: re})}, `Message in “${current.title}”: ${text.slice(0, 80)}`);
-    if (!canned) { $("#say").value = ""; $("#say").style.height = "auto"; aboutId = null; aboutBar(); }
+  try { const r = await api(`threads/${current.id}/say`, {text, ...(re && {about: re}), ...(files.length && {files})},
+      `Message in “${current.title}”: ${text.slice(0, 80)}${files.length ? ` (📎 ${files.length})` : ""}`);
+    if (!canned) { $("#say").value = ""; $("#say").style.height = "auto"; aboutId = null; aboutBar(); sayFiles.clear(); }
     toast(r.queued ? "Not sent yet: it sends when the connection is back" : canned ? "Asked Claude to explain" : "Sent");
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
@@ -635,42 +640,56 @@ function capture() {
   head("New thread", true);
   const p = new URLSearchParams(location.search);
   const shared = [p.get("title"), p.get("text"), p.get("url")].filter(Boolean).join("\n");
-  $("#main").innerHTML = `<textarea class="capture" id="cap" placeholder="What do you need? (tap the mic on the keyboard to talk; paste or drop images)">${esc(shared)}</textarea>
+  $("#main").innerHTML = `<textarea class="capture" id="cap" placeholder="What do you need? (tap the mic on the keyboard to talk; paste or drop files)">${esc(shared)}</textarea>
     <div class="thumbs" id="thumbs"></div>
-    <p><button class="btn" id="go">Start</button> <label class="btn ghost">📎 Images<input type="file" id="pick" accept="image/*" multiple hidden></label></p>`;
+    <p><button class="btn" id="go">Start</button> <label class="btn ghost">📎 Attach<input type="file" id="pick" multiple hidden></label></p>`;
   history.replaceState(null, "", location.pathname + location.hash);
   $("#cap").focus(); slashMenu($("#cap"));
-  const imgs = [];  // data: URLs, in the order he added them
-  const draw = () => { $("#thumbs").innerHTML = imgs.map((u, i) => `<span><img src="${u}" alt="Image ${i + 1}"><button data-rm="${i}" aria-label="Remove image ${i + 1}">×</button></span>`).join("");
-    $("#thumbs").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { imgs.splice(+b.dataset.rm, 1); draw(); }); };
-  const add = async files => {
-    for (const f of files) if (f.type.startsWith("image/")) {
-      if (imgs.length >= 10) { toast("10 images at most"); break; }
-      try { imgs.push(await shrink(f)); } catch { toast(`Couldn't read ${f.name || "that image"}`); }
-    }
-    draw();
-  };
-  $("#pick").onchange = e => { add([...e.target.files]); e.target.value = ""; };
-  $("#cap").onpaste = e => { const fs = [...e.clipboardData.files]; if (fs.length) { e.preventDefault(); add(fs); } };
-  $("#main").ondragover = e => e.preventDefault();
-  $("#main").ondrop = e => { e.preventDefault(); add([...e.dataTransfer.files]); };
+  const att = attacher($("#cap"), $("#main"), $("#thumbs"), $("#pick"));
   $("#go").onclick = async () => {
-    const text = $("#cap").value.trim(); if (!text && !imgs.length) return;
+    const text = $("#cap").value.trim(), files = att.list(); if (!text && !files.length) return;
     $("#go").disabled = true; $("#go").textContent = "Starting…";
-    try { const r = await api("threads", {text, images: imgs}); toast("Started"); location.hash = `t=${r.id}`; }
+    try { const r = await api("threads", {text, files}); toast("Started"); location.hash = `t=${r.id}`; }
     catch (e) { toast(e.message); $("#go").disabled = false; $("#go").textContent = "Start"; }
   };
 }
 
-// An image as a data: URL. Small ones go as they are (screenshots stay sharp); big photos are
-// redrawn as JPEG no wider or taller than 2048px, so ten of them fit in one request.
+// Attachments for a text box: paste, drop or 📎, any kind of file, up to 10 and about 28 MB in all
+// (the server takes 40 MB of base64). Images are shrunk (shrink); everything else goes as it is.
+function attacher(ta, zone, thumbs, pick) {
+  const files = [];  // {name, data: a data: URL, img}, in the order he added them
+  const draw = () => { thumbs.innerHTML = files.map((f, i) => `<span>${f.img ? `<img src="${f.data}" alt="${esc(f.name)}">` : `<i>${esc(f.name)}</i>`}<button data-rm="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join("");
+    thumbs.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { files.splice(+b.dataset.rm, 1); draw(); }); };
+  const add = async list => {
+    for (const f of list) {
+      if (files.length >= 10) { toast("10 files at most"); break; }
+      let one;
+      try { one = f.type.startsWith("image/") ? await shrink(f) : {name: f.name || "file", data: await readURL(f)}; }
+      catch { toast(`Couldn't read ${f.name || "that file"}`); continue; }
+      if (files.reduce((n, x) => n + x.data.length, one.data.length) > 38e6) { toast(`${one.name} is too big: about 28 MB in all`); continue; }
+      files.push(one);
+    }
+    draw();
+  };
+  pick.onchange = e => { add([...e.target.files]); e.target.value = ""; };
+  ta.onpaste = e => { const fs = [...e.clipboardData.files]; if (fs.length) { e.preventDefault(); add(fs); } };
+  zone.ondragover = e => e.preventDefault();
+  zone.ondrop = e => { e.preventDefault(); add([...e.dataTransfer.files]); };
+  return {list: () => files.map(({name, data}) => ({name, data})), clear: () => { files.length = 0; draw(); }};
+}
+const readURL = b => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(b); });
+
+// An image as {name, data: a data: URL, img}. Small ones go as they are (screenshots stay sharp); big photos are
+// redrawn as JPEG no wider or taller than 2048px. One the browser can't draw (HEIC, say) goes as it is.
 async function shrink(f) {
-  const read = b => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(b); });
-  if (f.size < 1.5e6 && /^image\/(jpeg|png|webp|gif)$/.test(f.type)) return read(f);
-  const bmp = await createImageBitmap(f), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
-  const c = Object.assign(document.createElement("canvas"), {width: Math.round(bmp.width * k), height: Math.round(bmp.height * k)});
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-  return read(await new Promise(ok => c.toBlob(ok, "image/jpeg", 0.85)));
+  const name = f.name || `image.${(f.type.split("/")[1] || "png").replace("jpeg", "jpg")}`;
+  if (f.size < 1.5e6 && /^image\/(jpeg|png|webp|gif)$/.test(f.type)) return {name, data: await readURL(f), img: true};
+  try {
+    const bmp = await createImageBitmap(f), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+    const c = Object.assign(document.createElement("canvas"), {width: Math.round(bmp.width * k), height: Math.round(bmp.height * k)});
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return {name: name.replace(/(\.\w+)?$/, ".jpg"), data: await readURL(await new Promise(ok => c.toBlob(ok, "image/jpeg", 0.85))), img: true};
+  } catch { return {name, data: await readURL(f)}; }
 }
 
 // --- settings: rules, modes, delegations, stats ----------------------------------------
@@ -748,6 +767,7 @@ function wireModes() {
 function route() {
   clearInterval(timer); lastSig = ""; current = null;
   document.querySelector(".composer")?.remove();
+  document.body.ondrop = document.body.ondragover = $("#main").ondrop = $("#main").ondragover = null;  // a page's drop target goes with it
   const h = location.hash.slice(1);
   if (h.startsWith("t=")) return thread(+h.slice(2));
   if (h === "new" || new URLSearchParams(location.search).has("text") || new URLSearchParams(location.search).has("url")) return capture();
