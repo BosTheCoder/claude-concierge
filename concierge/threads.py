@@ -293,7 +293,27 @@ def _deliver(pane: str | None, text: str, *, submitter=None) -> str | None:
         return "the Concierge can't type into this chat (it was started from the Claude app): reply in its Claude chat, linked at the top"
     lock = _PANE_LOCKS.setdefault(pane, threading.Lock())
     with lock:  # two taps at once would type into each other
+        if submitter is None:
+            revive(pane)
         return (submitter or tmuxctl.submit)(pane, text)
+
+
+def revive(pane: str, *, state_path: Path | None = None, tmux=tmuxctl) -> None:
+    """A job whose window has gone (orphaned by a restart, closed by the reaper) gets its session
+    resumed, same chat and history, so his message lands instead of failing: H0, 2026-11-28."""
+    session, _, window = pane.partition(":")
+    if session != config.TMUX_SESSION or window in tmux.list_windows(session):
+        return
+    from concierge import registry, spawn
+
+    jobs = registry.load(state_path)
+    job_id = next((j for j, v in jobs.items() if (v.get("tmux_window") or j) == window
+                   and v.get("claude_session_id")), None)
+    if job_id:
+        try:
+            spawn.resume_job(job_id, state_path=state_path, tmux=tmux)
+        except Exception:  # noqa: BLE001 - submit then says why it didn't land
+            pass
 
 
 def _to_job(thread: sqlite3.Row, body: str) -> str:

@@ -228,3 +228,19 @@ def test_the_chat_link_comes_from_the_sessions_own_transcript(tmp_path):
         '{"type":"system","subtype":"bridge_status","url":"https://claude.ai/code/session_01NEW"}\n')
     assert spawn.rc_url_from_transcript("sid1", tmp_path) == "https://claude.ai/code/session_01NEW"
     assert spawn.rc_url_from_transcript("other", tmp_path) is None
+
+
+def test_a_message_to_an_orphaned_thread_resumes_its_session_first(tmp_path, monkeypatch):
+    """H0, 2026-11-28: a restart orphaned the job and his reply failed with 'no input box'."""
+    from concierge import threads
+
+    monkeypatch.setattr(spawn.settings, "render_prompt", lambda name: Path("/p/job.md"))
+    state = tmp_path / "jobs.json"
+    registry.upsert("H0", state, id="H0", title="t", status="orphaned", cwd=TASKS,
+                    tmux_window="H0", claude_session_id="sid-1")
+    tmux = FakeTmux()
+    threads.revive(f"{config.TMUX_SESSION}:H0", state_path=state, tmux=tmux)
+    assert tmux.windows[0][1] == "H0" and tmux.windows[0][2].endswith("--resume sid-1")
+
+    threads.revive(f"{config.TMUX_SESSION}:H0", state_path=state, tmux=tmux)  # running now: left alone
+    assert len(tmux.windows) == 1
