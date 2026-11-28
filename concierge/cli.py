@@ -222,6 +222,8 @@ def respawn(job_id: str, *, state_path: Path | None = None, db=None) -> dict:
     db = db or threads.connect()
     db.execute("UPDATE threads SET job=?, pane=? WHERE job=? AND status='open'",
                (fresh["id"], f"{config.TMUX_SESSION}:{fresh.get('tmux_window') or fresh['id']}", job_id))
+    for t in db.execute("SELECT id FROM threads WHERE job=? AND status='open'", (fresh["id"],)).fetchall():
+        threads.redeliver(db, t["id"])  # whatever of his the old window never got
     return fresh
 
 

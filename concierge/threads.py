@@ -14,6 +14,7 @@ Two rules the rest of this file exists to keep:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -83,7 +84,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
     for table, col in (("threads", "summary"), ("messages", "context"), ("messages", "why"), ("messages", "revised"),
-                       ("messages", "ref"), ("messages", "body"), ("messages", "cards")):
+                       ("messages", "ref"), ("messages", "body"), ("messages", "cards"), ("messages", "retry")):
         if col not in {c["name"] for c in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
     if not db.execute("SELECT 1 FROM modes LIMIT 1").fetchone() and not _kv(db, "modes_seeded"):
@@ -284,18 +285,59 @@ def set_floor(db, thread_id: int, floor: str | None) -> None:
 
 
 # --- talking to the job ---------------------------------------------------------------
-_PANE_LOCKS: dict[str, threading.Lock] = {}
+_PANE_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _pane_lock(pane: str | None):
+    # Re-entrant: _tell holds it across the catch-up and the new message, and _deliver takes it again.
+    return _PANE_LOCKS.setdefault(pane, threading.RLock()) if pane else contextlib.nullcontext()
 
 
 def _deliver(pane: str | None, text: str, *, submitter=None) -> str | None:
     """None once it left the input box, else why not."""
     if not pane:
         return "the Concierge can't type into this chat (it was started from the Claude app): reply in its Claude chat, linked at the top"
-    lock = _PANE_LOCKS.setdefault(pane, threading.Lock())
-    with lock:  # two taps at once would type into each other
+    with _pane_lock(pane):  # two taps at once would type into each other
         if submitter is None:
             revive(pane)
         return (submitter or tmuxctl.submit)(pane, text)
+
+
+def _tell(db, thread: sqlite3.Row, msg_id: int, body: str, *, ok: str | None = "picked", submitter=None) -> str | None:
+    """Deliver what row `msg_id` tells the job and record how it went. A failure keeps the body, so the
+    next delivery to this thread sends it first: he never has to notice a tap went nowhere (H0, 2026-11-28)."""
+    with _pane_lock(thread["pane"]):
+        problem = _catch_up(db, thread, submitter)  # earlier misses first, or this would overtake them
+        if not problem:
+            problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
+        db.execute("UPDATE messages SET state=?, error=?, retry=? WHERE id=?",
+                   ("failed" if problem else ok, problem, body if problem else None, msg_id))
+    return problem
+
+
+def redeliver(db, thread_id: int, *, submitter=None) -> str | None:
+    """Send the thread's job everything of his that failed to reach it, oldest first, each once.
+    None once all of it landed, else why the next one didn't."""
+    thread = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
+    with _pane_lock(thread["pane"]):
+        return _catch_up(db, thread, submitter)
+
+
+def _catch_up(db, thread: sqlite3.Row, submitter) -> str | None:
+    rows = db.execute("SELECT * FROM messages WHERE thread=? AND state='failed' AND retry IS NOT NULL "
+                      "ORDER BY COALESCE(answered_at, created), id", (thread["id"],)).fetchall()
+    for m in rows:
+        if not db.execute("UPDATE messages SET state='sending' WHERE id=? AND state='failed'", (m["id"],)).rowcount:
+            continue  # undone meanwhile
+        at = datetime.fromisoformat(m["answered_at"] or m["created"]).astimezone(LONDON)
+        late = f" (From {at:%a %H:%M}: it didn't reach you then, delivered now.)"
+        problem = _deliver(thread["pane"], _to_job(thread, m["retry"] + late), submitter=submitter)
+        ok = None if m["answered_by"] == "parked" else "picked"
+        db.execute("UPDATE messages SET state=?, error=?, retry=? WHERE id=?",
+                   ("failed" if problem else ok, problem, m["retry"] if problem else None, m["id"]))
+        if problem:
+            return problem
+    return None
 
 
 def revive(pane: str, *, state_path: Path | None = None, tmux=tmuxctl) -> None:
@@ -359,12 +401,9 @@ def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None 
                 "deal with that first: `concierge withdraw <id> \"<why>\"` for ones it settles, "
                 "`concierge revise <id>` for ones it changes. Email and chat cards too.)")
     sent = f"\n{attached(files)}" if files else ""
-    problem = _deliver(thread["pane"], _to_job(thread, f"Kelvin says:{ref} {text}{tail}{skills.hint(text)}{sent}"),
-                       submitter=submitter)
+    problem = _tell(db, thread, mid, f"Kelvin says:{ref} {text}{tail}{skills.hint(text)}{sent}", submitter=submitter)
     if problem and tail:
         _unpark(db, about)  # the job never heard, so nobody would bring it back
-    db.execute("UPDATE messages SET state=?, error=? WHERE id=?",
-               ("failed" if problem else "picked", problem, mid))
     return mid
 
 
@@ -405,9 +444,7 @@ def _send_answer(db, msg_id: int, *, note: str = "", submitter=None) -> str | No
     msg = db.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
     thread = db.execute("SELECT * FROM threads WHERE id=?", (msg["thread"],)).fetchone()
     body = f'Decision on "{msg["text"]}": Kelvin chose "{msg["answer"]}".' + (f" {note}" if note else "")
-    problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
-    db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else "picked", problem, msg_id))
-    return problem
+    return _tell(db, thread, msg_id, body, submitter=submitter)
 
 
 def card_sent(db, msg_id: int, *, answer: str, told: str, submitter=None) -> str | None:
@@ -415,11 +452,7 @@ def card_sent(db, msg_id: int, *, answer: str, told: str, submitter=None) -> str
     _, thread = _decision(db, msg_id)
     db.execute("UPDATE messages SET answer=?, answered_by='me', answered_at=?, state='picked' WHERE id=?",
                (answer, _iso(now()), msg_id))
-    problem = _deliver(thread["pane"], _to_job(thread, told + " It is sent: log it, don't send it again."),
-                       submitter=submitter)
-    if problem:
-        db.execute("UPDATE messages SET state='failed', error=? WHERE id=?", (problem, msg_id))
-    return problem
+    return _tell(db, thread, msg_id, told + " It is sent: log it, don't send it again.", submitter=submitter)
 
 
 def park(db, msg_id: int, why: str, *, cards: bool = False) -> bool:
@@ -447,9 +480,7 @@ def set_aside(db, msg_id: int, *, submitter=None) -> str | None:
             "Carry on with whatever doesn't hang on it. If you can't move without his call, bring it back "
             f"with `concierge revise {msg_id}` once something changes (new facts, a deadline getting close), "
             "saying what changed in --context. If it no longer matters, leave it." + card)
-    problem = _deliver(thread["pane"], _to_job(thread, body), submitter=submitter)
-    db.execute("UPDATE messages SET state=?, error=? WHERE id=?", ("failed" if problem else None, problem, msg_id))
-    return problem
+    return _tell(db, thread, msg_id, body, ok=None, submitter=submitter)
 
 
 def bring_back(db, msg_id: int, *, submitter=None) -> str | None:

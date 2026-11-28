@@ -288,3 +288,26 @@ def test_his_reply_tells_the_job_which_decisions_it_may_have_settled_and_cards_c
     threads.withdraw(db, ask, "seeing photos first")
     threads.say(db, th["id"], "thanks", submitter=lambda pane, text: typed.append(text))
     assert "Still on his list" not in typed[-1]  # nothing open, nothing listed
+
+
+def test_a_tap_that_failed_to_reach_the_job_goes_with_its_next_delivery_once_and_in_order(db, clock):
+    # H0, 2026-11-28: a restart closed the window, two taps failed and stayed failed; only his typed
+    # messages were later sent again (by hand), so the job never heard his answers.
+    th = threads.find_or_create(db, job="H0", title="Tokens", pane="concierge:H0")
+    first = threads.post(db, th, "Compact at 200k?", options=["All sessions", "No"], sender=lambda *_: None)
+    second = threads.post(db, th, "Inbox brief?", options=["Both", "Neither"], sender=lambda *_: None)
+    gone = lambda *_: "it has no input box on screen — still starting, or its window is gone"
+    threads.answer(db, first, "All sessions", submitter=gone)
+    clock["now"] += timedelta(minutes=5)
+    threads.answer(db, second, "Both", submitter=gone)
+    assert db.execute("SELECT state FROM messages WHERE id=?", (first,)).fetchone()["state"] == "failed"
+
+    typed = []
+    threads.say(db, th["id"], "what happened here?", submitter=lambda pane, text: typed.append(text))
+    assert [t.split("] ", 1)[1][:12] for t in typed] == ["Decision on ", "Decision on ", "Kelvin says:"]
+    assert 'chose "All sessions"' in typed[0] and 'chose "Both"' in typed[1]
+    states = {m["id"]: m["state"] for m in threads.detail(db, th["id"])["messages"]}
+    assert states[first] == states[second] == "picked"  # no more "not delivered" in the app
+
+    threads.say(db, th["id"], "thanks", submitter=lambda pane, text: typed.append(text))
+    assert len(typed) == 4  # once: the next message doesn't resend them
