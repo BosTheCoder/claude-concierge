@@ -36,7 +36,7 @@
   .row .t span:first-of-type { flex:1; }
   .row.working { border-left-color:var(--green); animation:breathe 1.6s ease-in-out infinite; }
   .row .live { width:8px; height:8px; border-radius:50%; background:var(--green); flex:none; align-self:center; animation:pulse 1.2s ease-in-out infinite; }
-  .need .working { color:var(--green); }
+  .need .working, .muted .working { color:var(--green); }
   @keyframes pulse { 50% { opacity:.25; transform:scale(.7); } }
   @keyframes breathe { 50% { border-left-color:#1d5a2a; } }
   @media (prefers-reduced-motion: reduce) { .row.working, .row .live { animation:none; } }
@@ -359,7 +359,7 @@ async function thread(id, quiet) {
   const offline = await waitingAnswers();
   for (const m of t.messages) if (offline[m.id] && m.answer == null)
     Object.assign(m, {answer: offline[m.id].choice, answered_by: "me", answered_at: offline[m.id].at, state: "offline"});
-  const sig = JSON.stringify([t.messages, t.facts, t.summary, t.status, t.floor, t.delegation]);
+  const sig = JSON.stringify([t.messages, t.facts, t.summary, t.status, t.floor, t.delegation, t.working, t.alive]);
   if (quiet && sig === lastSig) return;
   if (!current || current.id !== t.id) { histOpen = false; aboutId = null; }
   lastSig = sig; current = t;
@@ -384,7 +384,7 @@ async function thread(id, quiet) {
   const latest = lastJob && !lastJob.options && !mine.includes(lastJob) ? lastJob : null;
   const shown = new Set([...open, ...recent, ...mine, ...(latest ? [latest] : [])]);
   const past = ms.filter(m => !shown.has(m));
-  const top = (t.job ? `<p class="muted">Claude chat: ${t.chat_url ? `<a href="${esc(t.chat_url)}" target="_blank" rel="noopener">${esc(t.job)} ↗</a>` : esc(t.job)}</p>` : "")
+  const top = (t.job ? `<p class="muted">Claude chat: ${t.chat_url ? `<a href="${esc(t.chat_url)}" target="_blank" rel="noopener">${esc(t.job)} ↗</a>` : esc(t.job)}${t.status === "closed" ? "" : t.working ? ` · <span class="working">Working now</span>` : t.alive ? " · Waiting, session open" : ` · <b>Not running</b>`}</p>` : "")
     + (t.summary ? `<div class="summary"><div class="who">Summary</div>${linkify(t.summary)}${gal(t.summary)}</div>` : "")
     + (latest ? `<div class="summary"><div class="who">Latest from Claude · ${age(latest.created)}</div>${linkify(latest.text)}${gal(latest.text)}${deck(latest)}</div>` : "");
   const other = rows(t.other_facts);

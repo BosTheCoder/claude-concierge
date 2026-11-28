@@ -151,7 +151,7 @@ def get(path: str, query: dict) -> tuple[int, dict]:
                 return 502, {"error": str(exc) if m.group(2) == "chat" else f"Gmail: {exc}"}
         if m := ROUTE.match(path):
             try:
-                d = threads.detail(db, int(m.group(1)))
+                d = threads.mark_working([threads.detail(db, int(m.group(1)))])[0]
                 return 200, d | {"chat_url": (registry.load().get(d["job"] or "") or {}).get("rc_url")}
             except KeyError:
                 return 404, {"error": "no such thread"}

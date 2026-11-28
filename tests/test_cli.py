@@ -282,9 +282,15 @@ def test_respawn_starts_a_fresh_job_from_the_stored_brief(tmp_path, monkeypatch)
 
     monkeypatch.setattr(cli.spawn_mod, "spawn_job", fake_spawn)
 
-    fresh = cli.respawn("A3", state_path=state)
+    from concierge import threads
+    db = threads.connect(tmp_path / "threads.db")
+    th = threads.find_or_create(db, job="A3", title="calibre", pane="concierge:A3")
+
+    fresh = cli.respawn("A3", state_path=state, db=db)
 
     assert fresh["id"] == "B7"
+    # The new session's posts land in the thread he already reads, not a new one.
+    assert threads.find_or_create(db, job="B7", title="calibre")["id"] == th["id"]
     assert calls[0]["brief"].endswith("clean the epubs")
     assert calls[0]["brief"].startswith("You are resuming an interrupted job.")
     assert calls[0]["title"] == "calibre"

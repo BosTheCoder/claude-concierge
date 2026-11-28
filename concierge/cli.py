@@ -193,8 +193,9 @@ RESUME_PREFIX = (
 )
 
 
-def respawn(job_id: str, *, state_path: Path | None = None) -> dict:
-    """Start a fresh session for a job the restart interrupted."""
+def respawn(job_id: str, *, state_path: Path | None = None, db=None) -> dict:
+    """Start a fresh session for a job the restart interrupted. Its open thread goes
+    with it, so he keeps reading the same thread rather than a new one per restart."""
     jobs = registry.load(state_path)
     if job_id not in jobs:
         raise KeyError(f"unknown job: {job_id}")
@@ -216,6 +217,11 @@ def respawn(job_id: str, *, state_path: Path | None = None) -> dict:
         state_path=state_path,
     )
     registry.upsert(job_id, state_path, status="respawned")
+    from concierge import threads
+
+    db = db or threads.connect()
+    db.execute("UPDATE threads SET job=?, pane=? WHERE job=? AND status='open'",
+               (fresh["id"], f"{config.TMUX_SESSION}:{fresh.get('tmux_window') or fresh['id']}", job_id))
     return fresh
 
 

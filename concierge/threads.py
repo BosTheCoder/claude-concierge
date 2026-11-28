@@ -610,7 +610,8 @@ def home(db, *, q: str = "", closed: bool = False) -> list[dict]:
 
 
 def mark_working(rows: list[dict], *, live_panes=None, read=None) -> list[dict]:
-    """Set `working` on each thread whose Claude is mid-turn, so the list can show it.
+    """Set `working` on each thread whose Claude is mid-turn, and `alive` while its session
+    exists at all, so the app can say working / waiting / not running.
 
     The pane says so itself ("esc to interrupt", or a live turn timer; see
     sessions.pane_read). One `tmux list-panes` first, so a pane that is gone is
@@ -626,6 +627,7 @@ def mark_working(rows: list[dict], *, live_panes=None, read=None) -> list[dict]:
         if pane in live_panes and pane not in busy:
             busy[pane] = read(pane) == "busy"
         t["working"] = busy.get(pane, False)
+        t["alive"] = pane in live_panes
     return rows
 
 
