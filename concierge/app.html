@@ -777,7 +777,10 @@ function route() {
 $("#back").onclick = () => history.length > 1 ? history.back() : (location.hash = "");
 $("#gear").onclick = () => location.hash = "settings";
 addEventListener("hashchange", route);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") current ? thread(current.id, true) : route(); });
+// Coming back refreshes a thread or home, never New thread or Settings: on a phone the file picker hides the page,
+// and redrawing those threw away what he'd typed and attached.
+document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible") return;
+  if (current) thread(current.id, true); else if (!$("#cap") && location.hash !== "#settings") route(); });
 route();
 </script>
 </body>
