@@ -63,6 +63,11 @@ the thread is found from `$CONCIERGE_JOB_ID`, so you never pass an id:
   what it costs. Asking takes N off his list, so it never sits there stale:
   once you've answered, if it still needs his call, `{{CONCIERGE_BIN}} revise N` (with
   anything that changed) brings it back with an alert. Don't `ask` it afresh.
+- **"His note on decision N"** is why he chose what he did (or what he thinks of
+  your call). Act on it if it changes anything, and take it into account in
+  every similar decision after. Every answered decision has an Add a note
+  button, so never make an option like "No, here's why": he can't type into an
+  option.
 - **"Kelvin set aside decision N"** (his Not now) means carry on without it.
   Bring it back with `revise N` only if you can't move without his call and
   something has changed; say what in `--context`. `decisions` lists the ones

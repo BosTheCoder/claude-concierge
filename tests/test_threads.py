@@ -311,3 +311,13 @@ def test_a_tap_that_failed_to_reach_the_job_goes_with_its_next_delivery_once_and
 
     threads.say(db, th["id"], "thanks", submitter=lambda pane, text: typed.append(text))
     assert len(typed) == 4  # once: the next message doesn't resend them
+
+
+def test_a_note_on_an_answered_decision_reaches_the_job_with_what_he_chose(db, clock):
+    th = threads.find_or_create(db, job="K4", title="Hinge", pane="concierge:K4")
+    mid = threads.post(db, th, "Like Tamara, 27?", options=["Like", "Skip"], sender=lambda *_: None)
+    threads.answer(db, mid, "Skip", submitter=lambda *_: None)
+    typed = []
+    threads.say(db, th["id"], "too much travel content", about=mid, submitter=lambda pane, text: typed.append(text))
+    assert '"Skip"' in typed[0] and "too much travel content" in typed[0]
+    assert threads.detail(db, th["id"])["messages"][0]["answer"] == "Skip"  # a note doesn't reopen or park it

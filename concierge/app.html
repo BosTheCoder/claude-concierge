@@ -450,8 +450,8 @@ function opts(m) {
       : m.answered_by === "withdrawn" ? `<div class="answered withdrawn">Withdrawn: ${esc(m.answer)}</div>`
       : m.answered_by === "parked" ? `<div class="answered withdrawn">${m.answer === "Set aside" ? "Set aside: Claude carries on without it" : "Off your list while Claude answers"}${m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-back="${m.id}">Bring back</button></div>`
       : m.answered_by === "claude"
-      ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`}</div>`
-      : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "offline" ? " · waiting for signal" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-undo="${m.id}">Undo</button></div>`;
+      ? `<div class="answered claude">Claude chose “${esc(m.answer)}”${m.rule ? ` · rule: ${esc(m.rule)}` : ""}${m.undone ? " · <b>undone</b>" : ` <button class="btn ghost" data-undo="${m.id}">Undo</button>`} <button class="btn ghost" data-about="${m.id}">Add a note</button></div>`
+      : `<div class="answered">You chose “${esc(m.answer)}”${m.state === "held" ? " · sending in a moment" : m.state === "offline" ? " · waiting for signal" : m.state === "failed" ? ` · ⚠ not delivered: ${esc(m.error || "")}` : ""} <button class="btn ghost" data-undo="${m.id}">Undo</button>${m.state === "offline" ? "" : ` <button class="btn ghost" data-about="${m.id}">Add a note</button>`}</div>`;
   return `<div class="opts">${m.options.map(o => `<button data-msg="${m.id}" data-choice="${esc(o)}" class="${o === m.recommend ? "rec" : ""}">${esc(o)}</button>`).join("")}</div>`;
 }
 // An email a job drafted: he can change From, To, Cc, Subject and the text, then Send (two taps).
@@ -546,9 +546,12 @@ async function act(action, body) {
 // "Ask about this": his next message is tied to that decision, shown above the box until sent or dropped.
 function aboutBar() {
   $(".composer .about")?.remove();
+  if ($("#say")) $("#say").placeholder = "Message, or / for a skill";
   const d = current && aboutId && current.messages.find(m => m.id === aboutId);
   if (!d) return;
-  $(".composer").insertAdjacentHTML("afterbegin", `<div class="about"><span>About: ${esc(d.text)}</span><button class="icon" id="aboutx">✕</button></div>`);
+  const note = d.answer != null && ["me", "claude"].includes(d.answered_by);
+  $(".composer").insertAdjacentHTML("afterbegin", `<div class="about"><span>${note ? `Note on “${esc(d.answer)}”: ` : "About: "}${esc(d.text)}</span><button class="icon" id="aboutx">✕</button></div>`);
+  if (note) $("#say").placeholder = "Why? Claude takes it into account";
   $("#aboutx").onclick = () => { aboutId = null; aboutBar(); };
 }
 let sayFiles;  // the reply box's attachments (attacher)
@@ -575,6 +578,7 @@ async function choose(id, choice) {
   try { const r = await api(`threads/${current.id}/answer`, {msg:id, choice}, `Answer “${choice}” in “${current.title}”`);
     toast(r.queued ? `No signal: “${choice}” sends when you're back online. Undo is under the question` : current.messages.find(m => m.id === id)?.kind === "close?" ? `Done: ${choice}. Undo is under the question`
       : `“${choice}” goes in 10s. Undo is under the question`);
+    if (/\bwhy\b|…|\.\.\.$/i.test(choice)) { aboutId = id; $("#say").focus(); }
     setTimeout(() => { lastSig = ""; thread(current.id); }, 400); }
   catch (e) { toast(e.message); }
 }

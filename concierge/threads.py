@@ -381,11 +381,13 @@ def say(db, thread_id: int, text: str, *, author: str = "me", about: int | None 
     thread = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
     ref = ""
     if about is not None:
-        d = db.execute("SELECT text FROM messages WHERE id=? AND thread=? AND options IS NOT NULL",
+        d = db.execute("SELECT text, answer, answered_by FROM messages WHERE id=? AND thread=? AND options IS NOT NULL",
                        (about, thread_id)).fetchone()
         if not d:
             raise KeyError(f"no decision {about} in this thread")
-        ref = f' About decision {about} ("{d["text"][:200]}"):'
+        who = {"me": "he", "claude": "you"}.get(d["answered_by"])
+        ref = (f' His note on decision {about} ("{d["text"][:200]}", where {who} chose "{d["answer"]}"). '
+               "Take it into account from now on:" if who else f' About decision {about} ("{d["text"][:200]}"):')
     shown = f"Re: “{d['text'][:60]}…”\n{text}" if about is not None else text
     mid = post(db, thread, shown + clip(files), author=author)
     db.execute("UPDATE messages SET state='sent' WHERE id=?", (mid,))
