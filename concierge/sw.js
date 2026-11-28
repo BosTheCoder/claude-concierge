@@ -18,6 +18,7 @@ const ours = url => url.origin === location.origin && !url.pathname.startsWith("
 self.addEventListener("fetch", e => {
   const req = e.request, url = new URL(req.url);
   if (!ours(url)) return;
+  if (req.method === "POST" && url.pathname === "/claude/app/share") return e.respondWith(shareIn(req));
   if (req.method === "POST" && QUEUED.test(url.pathname)) return e.respondWith(sendOrQueue(req));
   if (req.method !== "GET" || req.headers.get("Accept")?.includes("text/event-stream") || req.headers.has("Range")) return;
   // Tasks keeps its own last copy, with offline edits applied: an older cached list would undo them on screen.
@@ -41,6 +42,19 @@ async function read(req, e) {
   // A page on a weak signal: show the last copy after 4 s (or as soon as the network fails), not a blank screen.
   const late = Promise.race([new Promise(ok => setTimeout(ok, 4000)), net.catch(() => {})]).then(old);
   return Promise.any([net, late.then(r => r || Promise.reject())]).catch(async () => (await old()) || net);
+}
+
+// The phone's share sheet (manifest share_target): keep what was shared in the "shared" cache and open
+// New thread, which picks it up (app.html sharedIn). A new share replaces anything not yet picked up.
+async function shareIn(req) {
+  const form = await req.formData(), box = await caches.open("shared");
+  for (const k of await box.keys()) await box.delete(k);
+  const text = ["title", "text", "url"].map(k => form.get(k)).filter(Boolean).join("\n");
+  await box.put("/shared/text", new Response(text));
+  let i = 0;
+  for (const f of form.getAll("files")) if (f && f.size)
+    await box.put(`/shared/file/${i++}`, new Response(f, {headers: {"Content-Type": f.type || "application/octet-stream", "X-Name": encodeURIComponent(f.name || "file")}}));
+  return Response.redirect(new URL("/claude/app?shared=1#new", location).href, 303);
 }
 
 async function sendOrQueue(req) {

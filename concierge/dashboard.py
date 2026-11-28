@@ -562,6 +562,12 @@ def handler_for(sampler: Sampler):
             if self.path.startswith("/brief"):
                 self._proxy_brief()
                 return
+            if self._route() == "/app/share":  # a share the service worker didn't catch (not installed yet): open New thread
+                self.send_response(303)
+                self.send_header("Location", f"{CLAUDE_PREFIX}/app#new")
+                self.close_connection = True  # the body (the files) is left unread
+                self.end_headers()
+                return
             if self._route().startswith(("/api/threads", "/api/settings", "/api/delegations", "/api/inbox/")):
                 try:
                     length = int(self.headers.get("Content-Length") or 0)

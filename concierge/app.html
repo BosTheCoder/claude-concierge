@@ -650,12 +650,35 @@ function capture() {
   history.replaceState(null, "", location.pathname + location.hash);
   $("#cap").focus(); slashMenu($("#cap"));
   const att = attacher($("#cap"), $("#main"), $("#thumbs"), $("#pick"));
+  if (p.has("shared")) sharedIn(att);
   $("#go").onclick = async () => {
-    const text = $("#cap").value.trim(), files = att.list(); if (!text && !files.length) return;
-    $("#go").disabled = true; $("#go").textContent = "Starting…";
-    try { const r = await api("threads", {text, files}); toast("Started"); location.hash = `t=${r.id}`; }
-    catch (e) { toast(e.message); $("#go").disabled = false; $("#go").textContent = "Start"; }
+    const text = $("#cap").value.trim(), files = att.list(), to = $("#to")?.value; if (!text && !files.length) return;
+    $("#go").disabled = true; $("#go").textContent = to ? "Sending…" : "Starting…";
+    try {
+      if (to) { await api(`threads/${to}/say`, {text, ...(files.length && {files})}); toast("Sent"); location.hash = `t=${to}`; }
+      else { const r = await api("threads", {text, files}); toast("Started"); location.hash = `t=${r.id}`; }
+    } catch (e) { toast(e.message); $("#go").disabled = false; $("#go").textContent = to ? "Send" : "Start"; }
   };
+}
+
+// What the share sheet sent (sw.js shareIn): its text and files into the box, and a "Send to" so it can
+// go to an open thread instead of a new one. Taken out of the cache once read, so it isn't added twice.
+async function sharedIn(att) {
+  try {
+    const box = await caches.open("shared"), keys = await box.keys(), files = [];
+    for (const k of keys) {
+      const r = await box.match(k);
+      if (k.url.endsWith("/shared/text")) { const t = await r.text(); if (t) $("#cap").value = [$("#cap").value, t].filter(Boolean).join("\n"); }
+      else files.push(new File([await r.blob()], decodeURIComponent(r.headers.get("X-Name") || "file"), {type: r.headers.get("Content-Type") || ""}));
+    }
+    await att.add(files);
+    for (const k of keys) await box.delete(k);
+  } catch { toast("Couldn't read what was shared"); }
+  try {
+    const d = await api("threads");
+    $("#go").insertAdjacentHTML("beforebegin", `<select id="to" class="btn ghost" aria-label="Send to" style="display:block;width:100%;box-sizing:border-box;margin-bottom:8px"><option value="">New thread</option>${d.threads.filter(t => t.status !== "closed").map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join("")}</select> `);
+    $("#to").onchange = e => $("#go").textContent = e.target.value ? "Send" : "Start";
+  } catch {}
 }
 
 // Attachments for a text box: paste, drop or 📎, any kind of file, up to 10 and about 28 MB in all
@@ -679,7 +702,7 @@ function attacher(ta, zone, thumbs, pick) {
   ta.onpaste = e => { const fs = [...e.clipboardData.files]; if (fs.length) { e.preventDefault(); add(fs); } };
   zone.ondragover = e => e.preventDefault();
   zone.ondrop = e => { e.preventDefault(); add([...e.dataTransfer.files]); };
-  return {list: () => files.map(({name, data}) => ({name, data})), clear: () => { files.length = 0; draw(); }};
+  return {add, list: () => files.map(({name, data}) => ({name, data})), clear: () => { files.length = 0; draw(); }};
 }
 const readURL = b => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(b); });
 

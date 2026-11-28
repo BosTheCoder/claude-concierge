@@ -43,9 +43,13 @@ def manifest(prefix: str = "") -> str:
         "display": "standalone", "background_color": "#0e1116", "theme_color": "#0e1116",
         "icons": [{"src": f"{prefix}/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
         "shortcuts": shortcuts,
-        # The phone's share sheet: share text or a link to Concierge and it starts a thread.
-        "share_target": {"action": f"{prefix}/app", "method": "GET",
-                         "params": {"title": "title", "text": "text", "url": "url"}},
+        # The phone's share sheet: share text, a link, photos or files to Concierge and New thread opens
+        # with them, with a "Send to" for an open thread instead. Files need sw.js (it catches the POST),
+        # which only the main address has, so the older :18787 install shares text only.
+        "share_target": {"action": f"{prefix}/app/share", "method": "POST", "enctype": "multipart/form-data",
+                         "params": {"title": "title", "text": "text", "url": "url",
+                                    "files": [{"name": "files", "accept": ["image/*", "video/*", "application/pdf", "*/*"]}]}}
+        if prefix else {"action": "/app", "method": "GET", "params": {"title": "title", "text": "text", "url": "url"}},
     })
 
 
